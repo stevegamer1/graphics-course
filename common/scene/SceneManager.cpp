@@ -411,3 +411,115 @@ etna::VertexByteStreamFormatDescription SceneManager::getVertexFormatDescription
       },
     }};
 }
+
+
+
+// ------ Below are the copypasted methods for HW7. ------
+
+
+
+SceneManager::ProcessedMeshes SceneManager::processMeshesCompressed(const tinygltf::Model& model) const
+{
+  ProcessedMeshes result;
+
+  ETNA_VERIFY(model.buffers.size() == 1); // sorry I was tired I didn't want to generalize
+  std::size_t indexStart = model.buffers[0].data.size();
+
+  {
+    for (const auto& bufView : model.bufferViews)
+    {
+      if (bufView.target == TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER) {
+        indexStart = std::min(indexStart, bufView.byteOffset);
+      }
+    }
+
+    result.vertices.resize(indexStart / sizeof(Vertex));
+    result.indices.resize((model.buffers[0].data.size() - indexStart) / sizeof(uint32_t));
+
+    memcpy(result.vertices.data(), model.buffers[0].data.data(), indexStart);
+    memcpy(result.indices.data(), model.buffers[0].data.data() + indexStart, model.buffers[0].data.size() - indexStart);
+  }
+
+  {
+    std::size_t totalPrimitives = 0;
+    for (const auto& mesh : model.meshes)
+      totalPrimitives += mesh.primitives.size();
+    result.relems.reserve(totalPrimitives);
+  }
+
+  result.meshes.reserve(model.meshes.size());
+
+  for (const auto& mesh : model.meshes)
+  {
+    result.meshes.push_back(Mesh{
+      .firstRelem = static_cast<std::uint32_t>(result.relems.size()),
+      .relemCount = static_cast<std::uint32_t>(mesh.primitives.size()),
+    });
+
+    for (const auto& prim : mesh.primitives)
+    {
+      if (prim.mode != TINYGLTF_MODE_TRIANGLES)
+      {
+        spdlog::warn(
+          "Encountered a non-triangles primitive, these are not supported for now, skipping it!");
+        --result.meshes.back().relemCount;
+        continue;
+      }
+
+      const auto normalIt = prim.attributes.find("NORMAL");
+      const auto tangentIt = prim.attributes.find("TANGENT");
+      const auto texcoordIt = prim.attributes.find("TEXCOORD_0");
+
+      const bool hasNormals = normalIt != prim.attributes.end();
+      const bool hasTangents = tangentIt != prim.attributes.end();
+      const bool hasTexcoord = texcoordIt != prim.attributes.end();
+      std::array accessorIndices{
+        prim.indices,
+        prim.attributes.at("POSITION"),
+        hasNormals ? normalIt->second : -1,
+        hasTangents ? tangentIt->second : -1,
+        hasTexcoord ? texcoordIt->second : -1,
+      };
+
+      std::array accessors{
+        &model.accessors[prim.indices],
+        &model.accessors[accessorIndices[1]],
+        hasNormals ? &model.accessors[accessorIndices[2]] : nullptr,
+        hasTangents ? &model.accessors[accessorIndices[3]] : nullptr,
+        hasTexcoord ? &model.accessors[accessorIndices[4]] : nullptr,
+      };
+
+      result.relems.push_back(RenderElement{
+        .vertexOffset = static_cast<std::uint32_t>(model.bufferViews[accessors[1]->bufferView].byteOffset / sizeof(Vertex)),
+        .indexOffset = static_cast<std::uint32_t>((model.bufferViews[accessors[0]->bufferView].byteOffset - indexStart) / sizeof(uint32_t)),
+        .indexCount = static_cast<std::uint32_t>(accessors[0]->count),
+      });
+
+      // Indices are guaranteed to have no stride
+      ETNA_VERIFY(model.bufferViews[accessors[0]->bufferView].byteStride == 0);
+    }
+  }
+
+  return result;
+}
+
+
+void SceneManager::selectSceneCompressed(std::filesystem::path path)
+{
+  auto maybeModel = loadModel(path);
+  if (!maybeModel.has_value())
+    return;
+
+  auto model = std::move(*maybeModel);
+
+  auto [instMats, instMeshes] = processInstances(model);
+  instanceMatrices = std::move(instMats);
+  instanceMeshes = std::move(instMeshes);
+
+  auto [verts, inds, relems, meshs] = processMeshesCompressed(model);
+
+  renderElements = std::move(relems);
+  meshes = std::move(meshs);
+
+  uploadData(verts, inds);
+}

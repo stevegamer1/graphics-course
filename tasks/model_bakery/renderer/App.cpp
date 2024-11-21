@@ -21,7 +21,14 @@ App::App()
 
   mainCam.lookAt({0, 10, 10}, {0, 0, 0}, {0, 1, 0});
 
-  renderer->loadScene(GRAPHICS_COURSE_RESOURCES_ROOT "/scenes/low_poly_dark_town/scene.gltf");
+  //renderer->loadScene(GRAPHICS_COURSE_RESOURCES_ROOT "/scenes/low_poly_dark_town/scene.gltf");
+  //renderer->loadScene(GRAPHICS_COURSE_RESOURCES_ROOT "/scenes/SimpleMeshes/glTF/SimpleMeshes.gltf");
+  //renderer->loadScene(GRAPHICS_COURSE_RESOURCES_ROOT "/scenes/lovely_town/scene.gltf");
+  // baked:
+  //renderer->loadScene(GRAPHICS_COURSE_RESOURCES_ROOT "/scenes/SimpleMeshes/glTF/SimpleMeshes_baked.gltf");
+  //renderer->loadScene(GRAPHICS_COURSE_RESOURCES_ROOT "/scenes/low_poly_dark_town/scene_baked.gltf");
+  //renderer->loadScene(GRAPHICS_COURSE_RESOURCES_ROOT "/scenes/lovely_town/scene_baked.gltf");
+  renderer->loadScene(GRAPHICS_COURSE_RESOURCES_ROOT "/scenes/Avocado/Avocado_baked.gltf");
 }
 
 void App::run()
