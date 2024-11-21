@@ -5,7 +5,7 @@ layout(local_size_x = 32, local_size_y = 16) in;
 layout(binding = 0, rgba8) uniform image2D resultImage;
 
 const vec2 iResolution = vec2(1280, 720);
-const float iTime = 2.0f;
+const float iTime = 10.0f;
 
 // --- START SHADERTOY COPYPASTA ---
 const float PI = 3.14159265359;

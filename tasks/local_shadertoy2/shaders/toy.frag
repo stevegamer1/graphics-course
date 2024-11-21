@@ -1,20 +1,30 @@
 #version 430
+#extension GL_GOOGLE_include_directive : require
 
-layout(local_size_x = 32, local_size_y = 16) in;
 
-layout(binding = 0, rgba8) uniform image2D resultImage;
+#include "cpp_glsl_compat.h"
 
-const vec2 iResolution = vec2(1280, 720);
-const float iTime = 2.0f;
 
-// --- START SHADERTOY COPYPASTA ---
+layout(binding = 0) uniform sampler2D iChannel0;
+layout(binding = 1) uniform sampler2D fileTexture;
+
+layout(location = 0) out vec4 out_fragColor;
+
+layout(push_constant) uniform params_t
+{
+  uvec2 resolution;
+} params;
+
+
+const float iTime = 10.0f;
+
 const float PI = 3.14159265359;
 
-const vec3 background_color = vec3(0.3, 0.7, 0.9);
 const float shape_tolerance = 1.0; // (0; inf) how smooth will shape transition be
-const float color_mix_sharpness = 10.0; // (1; inf) how sharp will color transition
+const float color_mix_sharpness = 10.; // (1; inf) how sharp will color transition
 const float trefoil_size = 6.0; // how big the whole thing is
 const float radius = 0.5;
+
 
 struct sphere {
     vec3 center;
@@ -65,6 +75,7 @@ light lights[n_lights] = light[](
     light(vec3(0, 0, -100.0), 10000.0, vec3(1, 1, 1))
 );
 
+vec3 grad(in vec3 point, in float delta);
 
 float sphere_sdf(in vec3 point, in vec3 center, in float radius) {
     return length(point - center) - radius;
@@ -84,12 +95,28 @@ float sdf(in vec3 point) {
     return -shape_tolerance * log2(sum);
 }
 
+vec3 get_sphere_texture_color(in sphere sph, in vec3 point) {
+    point -= sph.center + vec3(2.0);
+    point /= 20.0;
+    vec3 normal = normalize(abs(point * 20.0 + vec3(2.0)));
+    vec3 result_procedural = normal.x * texture(iChannel0, point.yz).rgb +
+    normal.y * texture(iChannel0, point.xz).rgb +
+    normal.z * texture(iChannel0, point.xy).rgb;
+    vec3 result_file = normal.x * texture(fileTexture, point.yz).rgb +
+    normal.y * texture(fileTexture, point.xz).rgb +
+    normal.z * texture(fileTexture, point.xy).rgb;
+
+    float mix_factor = 0.5f;
+    vec3 result = mix_factor * result_procedural + (1.0f - mix_factor) * result_file;
+    return result * 1.5;
+}
+
 vec3 base_color(in vec3 point) {
     vec3 color_num = vec3(0, 0, 0);
     vec3 color_denom = vec3(0, 0, 0);
     for (int i = 0; i < n_spheres; ++i) {
         float cwf = sphere_cwf(point, spheres[i].center, spheres[i].radius);
-        color_num += spheres[i].color * cwf;
+        color_num += get_sphere_texture_color(spheres[i], point) * cwf;
         color_denom += cwf;
     }
     return color_num / color_denom;
@@ -154,26 +181,24 @@ vec3 specular(in vec3 eye, in vec3 point, in vec3 base_color) {
 
 void positionSpheres() {
     for (int i = 0; i < n_spheres; ++i) {
+        //float t = iTime + PI * float(i) / float(n_spheres);
         float t = iTime + PI * float(i) / float(n_spheres);
         spheres[i].center = vec3(trefoil_size * cos(3.0 * t) * sin(t) + sin(2.0 * t) * 0.2,
                                  trefoil_size * cos(3.0 * t) * cos(t) + sin(t) * 0.2,
-                                 33.0 + 30.0 * sin(t * 0.5));
+                                 36.0 + 30.0 * sin(t * 0.5 + PI / 4.));
     }
 }
 
-// --- PAUSE SHADERTOY COPYPASTA
+vec3 skybox_color(in vec3 direction) {
+    // return texture(iChannel1, direction).rgb;
+    return vec3(0.3, 0.05, 0.05);
+}
 
 
-void main()
-{
-  ivec2 iuv = ivec2(gl_GlobalInvocationID.xy);
-
-  // TODO: Put your shadertoy code here!
-
-  // --- CONTINUE SHADERTOY COPYPASTA
+void main() {
   positionSpheres();
 
-  vec2 uv = (iuv - iResolution.xy / 2.0) / min(iResolution.x, iResolution.y);
+  vec2 uv = (gl_FragCoord.xy - params.resolution.xy / 2.0) / min(params.resolution.x, params.resolution.y);
 
   vec3 camera = vec3(0, 0, -1);
   vec3 ray = normalize(vec3(uv, 0) - camera);
@@ -181,20 +206,12 @@ void main()
   vec3 color;
   if (traceRay(ray, camera, surface_point)) {
       vec3 base = base_color(surface_point);
-      color = specular(camera, surface_point, base) + diffuse(surface_point, base) + background_color * base * 0.5;
+      vec3 normal = normalize(grad(surface_point, 0.0001));
+      vec3 skyray = reflect(ray, normal);
+      color = specular(camera, surface_point, base) + diffuse(surface_point, base);
   } else {
-      color = background_color;
+      color = skybox_color(ray);
   }
   
-  imageStore(resultImage, iuv, vec4(color, 1));
-
-  // --- END SHADERTOY COPYPASTA
-
-  /* --- DEFAULT CODE COMMENTED ---
-  // Simple gradient as a test.
-  vec3 color = vec3(vec2(uv) / vec2(1280, 720), 0);
-
-  if (uv.x < 1280 && uv.y < 720)
-    imageStore(resultImage, uv, vec4(color, 1));
-  */
+  out_fragColor = vec4(color, 1.0f);
 }
