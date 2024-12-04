@@ -75,14 +75,14 @@ App::App()
 
   {
     // TODO: Initialize any additional resources you require here!
-    etna::create_program("shadertoy1", {LOCAL_SHADERTOY_SHADERS_ROOT "toy.comp.spv"});
+    etna::create_program("shadertoy1", {LOCAL_SHADERTOY1_SHADERS_ROOT "toy.comp.spv"});
 
     pipeline = etna::get_context().getPipelineManager().createComputePipeline("shadertoy1", {});
 
     image = etna::get_context().createImage(etna::Image::CreateInfo{
       .extent = vk::Extent3D{resolution.x, resolution.y, 1},
       .name = "resultImage",
-      .format = vk::Format::eR8G8B8A8Snorm,
+      .format = vk::Format::eR8G8B8A8Unorm,
       .imageUsage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc,
     });
 
@@ -165,14 +165,6 @@ void App::drawFrame()
       currentCmdBuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.getVkPipeline());
       currentCmdBuf.bindDescriptorSets(
         vk::PipelineBindPoint::eCompute, pipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
-
-      etna::set_state(
-        currentCmdBuf,
-        image.get(),
-        vk::PipelineStageFlagBits2::eComputeShader,
-        vk::AccessFlagBits2::eShaderWrite,
-        vk::ImageLayout::eGeneral,
-        vk::ImageAspectFlagBits::eColor);
 
       etna::flush_barriers(currentCmdBuf);
 
