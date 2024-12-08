@@ -39,6 +39,4 @@ private:
   std::unique_ptr<etna::Window> vkWindow;
   std::unique_ptr<etna::PerFrameCmdMgr> commandManager;
   std::unique_ptr<etna::OneShotCmdMgr> oneShotManager;
-
-  bool initializedFileTexture = false;
 };

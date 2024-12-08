@@ -90,6 +90,25 @@ App::App()
         .name = "default_sampler"
       });
   }
+
+  {
+    int x, y, n;
+    unsigned char *picData = stbi_load(TEXTURES_ROOT "texture1.bmp", &x, &y, &n, 4);
+    if (picData == NULL) {
+      throw "texture1.bmp not found";
+    }
+
+    etna::Image::CreateInfo fileTextureInfo{
+      .extent = vk::Extent3D{static_cast<uint32_t>(x), static_cast<uint32_t>(y), 1},
+      .name = "fileTexture",
+      .format = vk::Format::eR8G8B8A8Srgb,
+      .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+    };
+
+    fileTextureImage = etna::create_image_from_bytes(fileTextureInfo, etna::get_context().createOneShotCmdMgr()->start(), picData);
+
+    stbi_image_free(picData);
+  }
 }
 
 App::~App()
@@ -112,25 +131,6 @@ void App::run()
 void App::drawFrame()
 {
   auto currentCmdBuf = commandManager->acquireNext();
-
-  if (!initializedFileTexture) {
-    int x, y, n;
-    unsigned char *picData = stbi_load(TEXTURES_ROOT "texture1.bmp", &x, &y, &n, 4);
-    if (picData == NULL) {
-      throw "texture1.bmp not found";
-    }
-
-    etna::Image::CreateInfo fileTextureInfo{
-      .extent = vk::Extent3D{static_cast<uint32_t>(x), static_cast<uint32_t>(y), 1},
-      .name = "fileTexture",
-      .format = vk::Format::eR8G8B8A8Srgb,
-      .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
-    };
-    fileTextureImage = etna::create_image_from_bytes(fileTextureInfo, currentCmdBuf, picData);
-
-    stbi_image_free(picData);
-    initializedFileTexture = true;
-  }
 
   etna::begin_frame();
 
