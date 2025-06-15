@@ -1,5 +1,6 @@
 #pragma once
 #include "etna/BlockingTransferHelper.hpp"
+#include "etna/ComputePipeline.hpp"
 #include "etna/GraphicsPipeline.hpp"
 #include "etna/DescriptorSet.hpp"
 #include <filesystem>
@@ -9,12 +10,23 @@
 
 
 struct ParticleSystem {
-    struct DrawParams {
-        glm::vec4 posAndAngle;
-        glm::vec4 color;
+    static const uint32_t MAX_EMITTERS = 10;
+    static const uint32_t PARTICLES_PER_EMITTER = 100;  // will be dynamic later (well, actually probably no)
+
+    struct UpdatePushConsts {
+        glm::vec4 deltaTimeRelativeAnd3Padding;
+        glm::uvec4 firstParticleIndexAndTimeAndAliveCountAndCountToSpawn;
+        glm::vec4 minStartVelocityAnd1Padding;
+        glm::vec4 maxStartVelocityAnd1Padding;
+        glm::vec4 emitterPosAnd1Padding;
     };
 
-    struct PushConsts {
+    struct SortPushConsts {
+        glm::vec4 cameraPosAnd1Padding;
+        glm::uvec4 firstParticleIndexAndParticlesNumberAnd2Padding;
+    };
+
+    struct RenderPushConsts {
         glm::vec4 camPos;
         glm::mat4x4 viewProj;
     };
@@ -22,6 +34,7 @@ struct ParticleSystem {
     struct ParticleEmitter {
         // std::filesystem::path texture_path;
         // void loadTextureByPath();
+        uint32_t whichPlaceOccupies;
 
         glm::vec3 pos;
         glm::vec3 startVelocityMax;
@@ -35,45 +48,54 @@ struct ParticleSystem {
         glm::vec3 acceleration;
         glm::vec4 startColor{0.0f, 0.0f, 1.0f, 1.0f};
         glm::vec4 endColor{1.0f, 0.0f, 0.0f, 0.0f};
-        void update(glm::vec3 camera_pos, float delta_time);
+        // void update(glm::vec3 camera_pos, float delta_time);
 
         struct Particle {
-            glm::vec3 pos;
-            glm::vec3 velocity;
-            float angle;
-            float rotationSpeed;
-            float timeToLive;
+            glm::vec4 posAndAngle;
+            glm::vec4 velocityAndTimeToLiveRelative;
         };
 
-        std::vector<Particle> particlesVec;
+        // void spawnParticles(int count);
+        // void resetParticle(Particle& p);
+        // static bool isParticleAlive(const Particle& p);
 
-        void sortParticles(glm::vec3 cam_pos);  // Returns the amount of alive particles.
-        void killParticle(int index);
-        void spawnParticles(int count);
-        void resetParticle(Particle& p);
-        bool isParticleAlive(int index) const;
-        static bool isParticleAlive(const Particle& p);
+        // std::vector<Particle> particleParams = std::vector<Particle>(PARTICLES_PER_EMITTER);  // Will be deleted later.
     };
+
+    std::vector<bool> particleBufferPartIsOccupied;
+    uint32_t getFirstFreePBufferPart();
 
     std::unique_ptr<etna::OneShotCmdMgr> oneShotCommands;
 
     std::vector<ParticleEmitter> emitters;
-    std::vector<DrawParams> drawParams;
-    etna::Buffer drawParamsBuffer;
-    etna::DescriptorSet drawParamsDescriptorSet;
+    etna::Buffer particleParamsBuffer;
+    etna::Buffer aliveCountBuffer;
+    etna::DescriptorSet particleParamsDescriptorSet;
+    etna::DescriptorSet aliveCountDescriptorSet;
 
     ParticleSystem();
 
-    void setupPipeline(vk::Format swapchain_format);
+    void setupPipelines(vk::Format swapchain_format);
 
-    void update(glm::vec3 camera_pos, float delta_time);
+    void memBarrierSortAndUpdate(vk::CommandBuffer cmd_buf);
+
+    void update(glm::vec3 camera_pos, float delta_time, vk::CommandBuffer cmd_buf);
     void draw(glm::mat4x4 view_proj, vk::CommandBuffer cmd_buf);
+
+    // For every emitter returns the number of alive particles;
+    std::vector<uint32_t> sortParticles(vk::CommandBuffer cmd_buf, glm::vec3 cam_pos);
 
     void sortEmitters(glm::vec3 cam_pos);
 
     glm::vec3 cameraPosition;
+    float deltaTime;
+    float time = 0;
 
-    const char* SHADER_NAME = "particle_program";
-    etna::GraphicsPipeline pipeline;
+    const char* RENDER_SHADER_NAME = "particle_program";
+    const char* UPDATE_SHADER_NAME = "update_particles_program";
+    const char* SORT_SHADER_NAME = "sort_particles_program";
+    etna::GraphicsPipeline renderPipeline;
+    etna::ComputePipeline updatePipeline;
+    etna::ComputePipeline sortPipeline;
     etna::BlockingTransferHelper transferHelper;
 };

@@ -16,4 +16,6 @@ target_add_shaders(particles2
   shaders/static_mesh.vert
   shaders/particle.frag
   shaders/particle.vert
+  shaders/update_particles.comp
+  shaders/sort_particles.comp
 )

@@ -111,7 +111,7 @@ void WorldRenderer::setupPipelines(vk::Format swapchain_format)
     }
   );
 
-  particleSystem->setupPipeline(swapchain_format);
+  particleSystem->setupPipelines(swapchain_format);
 }
 
 void WorldRenderer::debugInput(const Keyboard&) {}
@@ -126,8 +126,12 @@ void WorldRenderer::update(const FramePacket& packet)
     worldViewProj = packet.mainCam.projTm(aspect) * packet.mainCam.viewTm();
   }
 
-  particleSystem->update(packet.mainCam.position, packet.currentTime - lastUpdateTime);
-  lastUpdateTime = packet.currentTime;
+  lastUpdateTime = lastFramePacket.currentTime;
+  lastFramePacket = packet;
+}
+
+void WorldRenderer::dispatchComputes(vk::CommandBuffer cmd_buf) {
+  particleSystem->update(lastFramePacket.mainCam.position, lastFramePacket.currentTime - lastUpdateTime, cmd_buf);
 }
 
 void WorldRenderer::drawGui() {
@@ -143,9 +147,9 @@ void WorldRenderer::drawParticleEmittersGui() {
 
     ImGui::PushID(&e);
     if (ImGui::CollapsingHeader("ParticleEmitter")) {
-      float spawnInput[4] = {e.spawnZoneExtent.x, e.spawnZoneExtent.y, e.spawnZoneExtent.z, 0};
-      ImGui::InputFloat3("Spawn zone extent", spawnInput);
-      e.spawnZoneExtent = glm::max(glm::vec3(spawnInput[0], spawnInput[1], spawnInput[2]), glm::vec3(0));
+      // float spawnInput[4] = {e.spawnZoneExtent.x, e.spawnZoneExtent.y, e.spawnZoneExtent.z, 0};
+      // ImGui::InputFloat3("Spawn zone extent", spawnInput);
+      // e.spawnZoneExtent = glm::max(glm::vec3(spawnInput[0], spawnInput[1], spawnInput[2]), glm::vec3(0));
 
       ImGui::InputFloat("Spawn rate", &(e.spawnFrequency));
       e.spawnFrequency = glm::max(e.spawnFrequency, 0.0f);
@@ -162,23 +166,23 @@ void WorldRenderer::drawParticleEmittersGui() {
       ImGui::InputFloat3("Start velocity maximum", velMaxInput);
       e.startVelocityMax = glm::max(glm::vec3(velMaxInput[0], velMaxInput[1], velMaxInput[2]), e.startVelocityMin);
 
-      float accInput[4] = {e.acceleration.x, e.acceleration.y, e.acceleration.z, 0};
-      ImGui::InputFloat3("Acceleration", accInput);
-      e.acceleration = glm::vec3(accInput[0], accInput[1], accInput[2]);
+      // float accInput[4] = {e.acceleration.x, e.acceleration.y, e.acceleration.z, 0};
+      // ImGui::InputFloat3("Acceleration", accInput);
+      // e.acceleration = glm::vec3(accInput[0], accInput[1], accInput[2]);
 
-      ImGui::InputFloat("Rotation speed minimum", &(e.rotationSpeedMin));
-      e.rotationSpeedMin = glm::min(e.rotationSpeedMin, e.rotationSpeedMax);
+      // ImGui::InputFloat("Rotation speed minimum", &(e.rotationSpeedMin));
+      // e.rotationSpeedMin = glm::min(e.rotationSpeedMin, e.rotationSpeedMax);
 
-      ImGui::InputFloat("Rotation speed maximum", &(e.rotationSpeedMax));
-      e.rotationSpeedMax = glm::max(e.rotationSpeedMax, e.rotationSpeedMin);
+      // ImGui::InputFloat("Rotation speed maximum", &(e.rotationSpeedMax));
+      // e.rotationSpeedMax = glm::max(e.rotationSpeedMax, e.rotationSpeedMin);
 
-      float startColorInput[4] = {e.startColor.r, e.startColor.g, e.startColor.b, e.startColor.a};
-      ImGui::ColorPicker4("Start color", startColorInput);
-      e.startColor = glm::vec4(startColorInput[0], startColorInput[1], startColorInput[2], startColorInput[3]);
+      // float startColorInput[4] = {e.startColor.r, e.startColor.g, e.startColor.b, e.startColor.a};
+      // ImGui::ColorPicker4("Start color", startColorInput);
+      // e.startColor = glm::vec4(startColorInput[0], startColorInput[1], startColorInput[2], startColorInput[3]);
 
-      float endColorInput[4] = {e.endColor.r, e.endColor.g, e.endColor.b, e.endColor.a};
-      ImGui::ColorPicker4("End color", endColorInput);
-      e.endColor = glm::vec4(endColorInput[0], endColorInput[1], endColorInput[2], endColorInput[3]);
+      // float endColorInput[4] = {e.endColor.r, e.endColor.g, e.endColor.b, e.endColor.a};
+      // ImGui::ColorPicker4("End color", endColorInput);
+      // e.endColor = glm::vec4(endColorInput[0], endColorInput[1], endColorInput[2], endColorInput[3]);
 
       // ImGui::SeparatorText("Texture");
       // {
@@ -210,11 +214,17 @@ void WorldRenderer::drawParticleEmittersGui() {
   }
 
   if (emitterToDelete.has_value()) {
+    particleSystem->particleBufferPartIsOccupied[particleSystem->emitters[emitterToDelete.value()].whichPlaceOccupies] = false;
     particleSystem->emitters.erase(particleSystem->emitters.begin() + emitterToDelete.value());
   }
 
   if (needCreateEmitter) {
-    particleSystem->emitters.emplace_back();
+    uint32_t bufPlace = particleSystem->getFirstFreePBufferPart();
+    if (bufPlace != uint32_t(-1)) {
+      particleSystem->emitters.emplace_back();
+      particleSystem->emitters.back().whichPlaceOccupies = bufPlace;
+      particleSystem->particleBufferPartIsOccupied[bufPlace] = true;
+    }
   }
 }
 

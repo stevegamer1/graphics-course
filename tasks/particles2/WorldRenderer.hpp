@@ -37,6 +37,7 @@ public:
 
   void debugInput(const Keyboard& kb);
   void update(const FramePacket& packet);
+  void dispatchComputes(vk::CommandBuffer cmd_buf);
   void drawGui();
   void renderWorld(
     vk::CommandBuffer cmd_buf, vk::Image target_image, vk::ImageView target_image_view);
@@ -49,6 +50,8 @@ private:
   void drawParticleEmittersGui();
 
 private:
+  FramePacket lastFramePacket;
+
   std::unique_ptr<etna::OneShotCmdMgr> oneShotCommands;
   etna::BlockingTransferHelper transferHelper;
   std::unique_ptr<SceneManager> sceneMgr;

@@ -177,6 +177,8 @@ void Renderer::drawFrame()
     auto [image, view, availableSem] = *nextSwapchainImage;
 
     ETNA_CHECK_VK_RESULT(currentCmdBuf.begin(vk::CommandBufferBeginInfo{}));
+    worldRenderer->dispatchComputes(currentCmdBuf);
+
     {
       ETNA_PROFILE_GPU(currentCmdBuf, renderFrame);
 

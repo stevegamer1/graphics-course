@@ -1,0 +1,83 @@
+#version 430
+
+// RNG
+
+uint hash( uint x ) {
+    x += ( x << 10u );
+    x ^= ( x >>  6u );
+    x += ( x <<  3u );
+    x ^= ( x >> 11u );
+    x += ( x << 15u );
+    return x;
+}
+
+uint hash( uvec4 v ) { return hash( v.x ^ hash(v.y) ^ hash(v.z) ^ hash(v.w) ); }
+
+uint rng_state = 0;
+uint rng(uint time, uint particle_index) {
+    uint tmp = rng_state;
+    rng_state = hash(uvec4(time, particle_index, tmp, 0));
+    return hash(uvec4(time, particle_index, tmp, 1));
+}
+
+float rng_f(uint time, uint particle_index) {
+  return float(rng(time, particle_index)) * (1.0 / 4294967295.0);
+}
+
+// RNG
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform params_t
+{
+  vec4 deltaTimeRelativeAnd3Padding;
+  uvec4 firstParticleIndexAndTimeAndAliveCountAndCountToSpawn;
+  vec4 minStartVelocityAnd1Padding;
+  vec4 maxStartVelocityAnd1Padding;
+  vec4 emitterPosAnd1Padding;
+} params;
+
+struct ParticleParams {
+  vec4 posAndAngle;
+  vec4 velocityAndTimeToLiveRelative;
+};
+
+layout(set=0, binding=0) buffer particleParams{
+  ParticleParams particle_params[];
+};
+
+void main()
+{
+  uint firstParticleIndex = params.firstParticleIndexAndTimeAndAliveCountAndCountToSpawn.x;
+  uint index = firstParticleIndex + gl_GlobalInvocationID.x;
+  uint time = params.firstParticleIndexAndTimeAndAliveCountAndCountToSpawn.y;
+  uint aliveCount = params.firstParticleIndexAndTimeAndAliveCountAndCountToSpawn.z;
+  uint countToSpawn = params.firstParticleIndexAndTimeAndAliveCountAndCountToSpawn.w;
+  float deltaTime = params.deltaTimeRelativeAnd3Padding.x;
+  vec3 velocity = particle_params[index].velocityAndTimeToLiveRelative.xyz;
+  float timeToLive = particle_params[index].velocityAndTimeToLiveRelative.w;
+
+  uint deadToSpawnBegin = firstParticleIndex + aliveCount;
+  uint deadToSpawnEnd = firstParticleIndex + aliveCount + countToSpawn;
+  if (index >= deadToSpawnBegin && index < deadToSpawnEnd) {
+    velocity = vec3(rng_f(time, index), rng_f(time, index), rng_f(time, index));
+    velocity *= (params.maxStartVelocityAnd1Padding.xyz - params.minStartVelocityAnd1Padding.xyz);
+    velocity += params.minStartVelocityAnd1Padding.xyz;
+    timeToLive = 1.0f;
+    particle_params[index].posAndAngle = vec4(rng_f(time, index), rng_f(time, index), rng_f(time, index), 0.0);
+    particle_params[index].posAndAngle += params.emitterPosAnd1Padding;
+    particle_params[index].posAndAngle.w = 0.0f;
+  } else if (timeToLive > 0) {
+    particle_params[index].posAndAngle.xyz += velocity * deltaTime;
+    velocity += vec3(0, -1, 0) * deltaTime;
+    timeToLive -= deltaTime;
+  } else {
+    timeToLive = -1.0f;
+  }
+
+  particle_params[index].velocityAndTimeToLiveRelative.xyz = velocity;
+  particle_params[index].velocityAndTimeToLiveRelative.w = timeToLive;
+
+  memoryBarrierBuffer();
+  barrier();
+}

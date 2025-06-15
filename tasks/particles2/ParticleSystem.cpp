@@ -1,3 +1,5 @@
+#define GLM_SWIZZLE
+#include <glm/glm.hpp>
 #include <glm/vec3.hpp>
 #include <etna/Profiling.hpp>
 #include "ParticleSystem.hpp"
@@ -6,93 +8,82 @@
 #include "etna/PipelineManager.hpp"
 
 
-void ParticleSystem::ParticleEmitter::update([[maybe_unused]] glm::vec3 camera_pos, [[maybe_unused]] float delta_time) {
-    accumulatedDesiredSpawn += spawnFrequency * delta_time;
-    if (accumulatedDesiredSpawn >= 1.0f) {
-        int particlesToSpawn = int(floor(accumulatedDesiredSpawn));
-        spawnParticles(particlesToSpawn);
-        accumulatedDesiredSpawn -= particlesToSpawn;
-    }
+// void ParticleSystem::ParticleEmitter::update([[maybe_unused]] glm::vec3 camera_pos, [[maybe_unused]] float delta_time) {
+//     accumulatedDesiredSpawn += spawnFrequency * delta_time;
+//     if (accumulatedDesiredSpawn >= 1.0f) {
+//         int particlesToSpawn = int(floor(accumulatedDesiredSpawn));
+//         spawnParticles(particlesToSpawn);
+//         accumulatedDesiredSpawn -= particlesToSpawn;
+//     }
 
-    for (size_t i = 0; i < particlesVec.size(); ++i) {
-        auto& p = particlesVec[i];
+//     for (size_t i = 0; i < PARTICLES_PER_EMITTER; ++i) {
+//         auto& p = particleParams[i];
 
-        p.pos += p.velocity * delta_time + acceleration * delta_time * delta_time / 2.0f;
-        p.velocity += acceleration * delta_time;
-        p.angle += p.rotationSpeed * delta_time;
-        p.timeToLive -= delta_time;
-    }
-}
+//         glm::vec3 velocity = p.velocityAndTimeToLiveRelative.xyz();
+//         glm::vec3 newPos = p.posAndAngle.xyz() + velocity * delta_time + acceleration * delta_time * delta_time / 2.0f;
+//         glm::vec3 newVel = velocity + acceleration * delta_time;
+//         float newTimeToLiveRelative = p.velocityAndTimeToLiveRelative.w - delta_time / particleLifetime;
 
-  // Returns the amount of alive particles.
-void ParticleSystem::ParticleEmitter::sortParticles(glm::vec3 cam_pos) {
-    std::sort(
-        particlesVec.begin(),
-        particlesVec.end(), 
-        [cam_pos](const Particle& p1, const Particle& p2) {
-                return (!isParticleAlive(p1) && isParticleAlive(p2)) ||
-                ((p1.pos - cam_pos).length() > (p2.pos - cam_pos).length());
-        }
-    );
-}
+//         p.posAndAngle = glm::vec4(newPos, 0.0f);
+//         p.velocityAndTimeToLiveRelative = glm::vec4(newVel, newTimeToLiveRelative);
+//     }
+// }
 
-void ParticleSystem::ParticleEmitter::killParticle([[maybe_unused]] int index) {
-    assert(isParticleAlive(index));
-    particlesVec[index].timeToLive = 0;
-}
+// void ParticleSystem::ParticleEmitter::sortParticles(glm::vec3 cam_pos) {
+//     std::sort(
+//         particlesVec.begin(),
+//         particlesVec.end(), 
+//         [cam_pos](const Particle& p1, const Particle& p2) {
+//                 return (!isParticleAlive(p1) && isParticleAlive(p2)) ||
+//                 ((p1.pos - cam_pos).length() > (p2.pos - cam_pos).length());
+//         }
+//     );
+// }
 
-void ParticleSystem::ParticleEmitter::resetParticle(ParticleSystem::ParticleEmitter::Particle& p) {
-    auto r = [](){
-        return float(rand()) / RAND_MAX - 0.5;
-    };
+// void ParticleSystem::ParticleEmitter::resetParticle(ParticleSystem::ParticleEmitter::Particle& p) {
+//     auto r = [](){
+//         return float(rand()) / RAND_MAX - 0.5;
+//     };
 
-    auto r0 = [](){
-        return float(rand()) / RAND_MAX;
-    };
+//     auto r0 = [](){
+//         return float(rand()) / RAND_MAX;
+//     };
 
-    p.timeToLive = particleLifetime;
-    p.pos = pos + glm::vec3(r(), r(), r()) * spawnZoneExtent;
-    p.velocity = glm::vec3(r0(), r0(), r0()) * (startVelocityMax - startVelocityMin) + startVelocityMin;
-    p.rotationSpeed = r0() * (rotationSpeedMax - rotationSpeedMin) + rotationSpeedMin;
-}
+//     glm::vec3 pPos = pos + glm::vec3(r(), r(), r()) * spawnZoneExtent;
+//     glm::vec3 velocity = glm::vec3(r0(), r0(), r0()) * (startVelocityMax - startVelocityMin) + startVelocityMin;
+//     p.posAndAngle = glm::vec4(pPos, 0.0f);
+//     p.velocityAndTimeToLiveRelative = glm::vec4(velocity, 1.0f);
+// }
 
-void ParticleSystem::ParticleEmitter::spawnParticles(int count) {
-    for (size_t i = 0; i < particlesVec.size() && count > 0; ++i) {
-        auto& p = particlesVec[i];
+// void ParticleSystem::ParticleEmitter::spawnParticles(int count) {
+//     for (size_t i = 0; i < PARTICLES_PER_EMITTER && count > 0; ++i) {
+//         auto& p = particleParams[i];
 
-        if (!isParticleAlive(int(i))) {
-            resetParticle(p);
-            --count;
-        }
-    }
+//         if (!isParticleAlive(p)) {
+//             resetParticle(p);
+//             --count;
+//         }
+//     }
+// }
 
-    if (count > 0) {
-        particlesVec.resize(particlesVec.size() + count);
-        spawnParticles(count);
-    }
-}
-
-bool ParticleSystem::ParticleEmitter::isParticleAlive(int index) const {
-    return isParticleAlive(particlesVec[index]);
-}
-
-bool ParticleSystem::ParticleEmitter::isParticleAlive(const Particle& p) {
-    return p.timeToLive > 0;
-}
+// bool ParticleSystem::ParticleEmitter::isParticleAlive(const Particle& p) {
+//     return p.velocityAndTimeToLiveRelative.w > 0;
+// }
 
 ParticleSystem::ParticleSystem()
     : oneShotCommands{etna::get_context().createOneShotCmdMgr()}
     , transferHelper{etna::BlockingTransferHelper::CreateInfo{.stagingSize = 65536}} {}
 
-void ParticleSystem::setupPipeline(vk::Format swapchain_format) {
+void ParticleSystem::setupPipelines(vk::Format swapchain_format) {
     
-    etna::create_program(SHADER_NAME, {
+    etna::create_program(RENDER_SHADER_NAME, {
             PARTICLES2_SHADERS_ROOT "particle.vert.spv",
             PARTICLES2_SHADERS_ROOT "particle.frag.spv"
         });
 
     auto& pipelineManager = etna::get_context().getPipelineManager();
-    pipeline = pipelineManager.createGraphicsPipeline(SHADER_NAME, {
+
+    renderPipeline = pipelineManager.createGraphicsPipeline(RENDER_SHADER_NAME, {
         .blendingConfig = {
             .attachments={
                 vk::PipelineColorBlendAttachmentState{
@@ -118,10 +109,30 @@ void ParticleSystem::setupPipeline(vk::Format swapchain_format) {
         }
     });
 
-    drawParamsBuffer = etna::get_context().createBuffer({
-        .size = sizeof(DrawParams) * 500000,
+    etna::create_program(UPDATE_SHADER_NAME, {
+        PARTICLES2_SHADERS_ROOT "update_particles.comp.spv"
+    });
+
+    updatePipeline = pipelineManager.createComputePipeline(UPDATE_SHADER_NAME, {});
+
+    
+    etna::create_program(SORT_SHADER_NAME, {
+        PARTICLES2_SHADERS_ROOT "sort_particles.comp.spv"
+    });
+
+    sortPipeline = pipelineManager.createComputePipeline(SORT_SHADER_NAME, {});
+
+    particleParamsBuffer = etna::get_context().createBuffer({
+        .size = sizeof(ParticleEmitter::Particle) * PARTICLES_PER_EMITTER * MAX_EMITTERS,
         .bufferUsage = vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
-        .name = "draw_params_buffer"
+        .name = "particles_params_buffer"
+    });
+    particleBufferPartIsOccupied = std::vector<bool>(MAX_EMITTERS, false);
+
+    aliveCountBuffer = etna::get_context().createBuffer({
+        .size = sizeof(uint32_t),
+        .bufferUsage = vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer,
+        .name = "alive_particles_count_buffer"
     });
 }
 
@@ -133,87 +144,197 @@ void ParticleSystem::sortEmitters(glm::vec3 cam_pos) {
     );
 }
 
-void ParticleSystem::update([[maybe_unused]] glm::vec3 camera_pos, [[maybe_unused]] float delta_time) {
-    ZoneScopedN("updateParticles");
+void ParticleSystem::memBarrierSortAndUpdate(vk::CommandBuffer cmd_buf) {
+    vk::MemoryBarrier bar{
+        .sType = vk::StructureType::eMemoryBarrier,
+        .pNext = nullptr,
+        .srcAccessMask = vk::AccessFlagBits::eShaderWrite,
+        .dstAccessMask = vk::AccessFlagBits::eShaderRead
+    };
 
-    for (auto& e : emitters) {
-        e.update(camera_pos, delta_time);
+    cmd_buf.pipelineBarrier(
+        vk::PipelineStageFlagBits::eComputeShader,
+        vk::PipelineStageFlagBits::eComputeShader,
+        vk::DependencyFlags(0),
+        1, &bar,
+        0, nullptr,
+        0, nullptr
+    );
+}
+
+std::vector<uint32_t> ParticleSystem::sortParticles(vk::CommandBuffer cmd_buf, glm::vec3 cam_pos) {
+    ZoneScopedN("sortParticles");
+
+    std::vector<uint32_t> aliveCounts(emitters.size());
+
+    {
+        particleParamsDescriptorSet = etna::create_descriptor_set(
+            etna::get_shader_program(SORT_SHADER_NAME).getDescriptorLayoutId(0), 
+            cmd_buf,
+            {
+                etna::Binding{0, particleParamsBuffer.genBinding()}
+            }
+        );
+    
+        assert(particleParamsDescriptorSet.isValid());
     }
 
+    {
+        aliveCountDescriptorSet = etna::create_descriptor_set(
+            etna::get_shader_program(SORT_SHADER_NAME).getDescriptorLayoutId(1),
+            cmd_buf,
+            {
+                etna::Binding{0, aliveCountBuffer.genBinding()}
+            }
+        );
+
+        assert(aliveCountDescriptorSet.isValid());
+    }
+
+    {
+        vk::DescriptorSet vkSets[2] = {
+            particleParamsDescriptorSet.getVkSet(),
+            aliveCountDescriptorSet.getVkSet()
+        };
+        cmd_buf.bindDescriptorSets(vk::PipelineBindPoint::eCompute, sortPipeline.getVkPipelineLayout(), 0, 2, vkSets, 0, nullptr);
+    }
+
+    for (uint32_t i = 0; i < emitters.size(); ++i)
+    {
+        auto& e = emitters[i];
+        cmd_buf.bindPipeline(vk::PipelineBindPoint::eCompute, sortPipeline.getVkPipeline());
+
+        SortPushConsts pc{
+            glm::vec4(cam_pos, 0),
+            glm::uvec4(e.whichPlaceOccupies * PARTICLES_PER_EMITTER, PARTICLES_PER_EMITTER, 0, 0)
+        };
+
+        cmd_buf.pushConstants(
+            updatePipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute,
+            0, sizeof(pc), &pc
+        );
+
+        cmd_buf.dispatch(1, 1, 1);
+
+        memBarrierSortAndUpdate(cmd_buf);
+
+        transferHelper.readbackBuffer(*oneShotCommands, std::span(aliveCounts.begin() + i, 1), aliveCountBuffer, 0);
+    }
+
+    return aliveCounts;
+}
+
+uint32_t ParticleSystem::getFirstFreePBufferPart() {
+    for (uint32_t result = 0; result < particleBufferPartIsOccupied.size(); ++result) {
+        if (!particleBufferPartIsOccupied[result]) {
+            return result;
+        }
+    }
+
+    return uint32_t(-1);
+}
+
+void ParticleSystem::update(glm::vec3 camera_pos, float delta_time, vk::CommandBuffer cmd_buf) {
+    ZoneScopedN("updateParticles");
+
+    // for (auto& e : emitters) {
+    //     e.update(camera_pos, delta_time);
+    // }
+
+    std::vector<uint32_t> aliveCounts = sortParticles(cmd_buf, camera_pos);
+
     cameraPosition = camera_pos;
+    deltaTime = delta_time;
+    time += deltaTime;
+
+    {
+        ETNA_PROFILE_GPU(cmd_buf, bindSet);
+
+        particleParamsDescriptorSet = etna::create_descriptor_set(
+            etna::get_shader_program(UPDATE_SHADER_NAME).getDescriptorLayoutId(0), 
+            cmd_buf,
+            {
+            etna::Binding{0, particleParamsBuffer.genBinding()}
+            }
+        );
+    
+        assert(particleParamsDescriptorSet.isValid());
+    
+        vk::DescriptorSet vkSet = particleParamsDescriptorSet.getVkSet();
+        cmd_buf.bindDescriptorSets(vk::PipelineBindPoint::eCompute, updatePipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
+    }
+
+    for (uint32_t i = 0; i < emitters.size(); ++i)
+    {
+        auto& e = emitters[i];
+        cmd_buf.bindPipeline(vk::PipelineBindPoint::eCompute, updatePipeline.getVkPipeline());
+
+        e.accumulatedDesiredSpawn += delta_time * e.spawnFrequency;
+        uint32_t countToSpawn = uint32_t(floor(e.accumulatedDesiredSpawn));
+        e.accumulatedDesiredSpawn -= countToSpawn;
+
+        UpdatePushConsts pc{
+            glm::vec4(deltaTime / e.particleLifetime, 0, 0, 0),
+            glm::uvec4(e.whichPlaceOccupies * PARTICLES_PER_EMITTER, uint32_t(time * 10000.0f), aliveCounts[i], countToSpawn),
+            glm::vec4(e.startVelocityMin, 0),
+            glm::vec4(e.startVelocityMax, 0),
+            glm::vec4(e.pos, 0)
+        };
+
+        cmd_buf.pushConstants(
+            updatePipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eCompute,
+            0, sizeof(pc), &pc
+        );
+
+        cmd_buf.dispatch(PARTICLES_PER_EMITTER, 1, 1);
+
+        memBarrierSortAndUpdate(cmd_buf);
+    }
 }
 
 void ParticleSystem::draw(glm::mat4x4 view_proj, vk::CommandBuffer cmd_buf) {
     {
         ETNA_PROFILE_GPU(cmd_buf, bindSet);
 
-        drawParamsDescriptorSet = etna::create_descriptor_set(
-            etna::get_shader_program(SHADER_NAME).getDescriptorLayoutId(0), 
+        particleParamsDescriptorSet = etna::create_descriptor_set(
+            etna::get_shader_program(RENDER_SHADER_NAME).getDescriptorLayoutId(0), 
             cmd_buf, 
             {
-            etna::Binding{0, drawParamsBuffer.genBinding()}
+            etna::Binding{0, particleParamsBuffer.genBinding()}
             }
         );
     
-        assert(drawParamsDescriptorSet.isValid());
+        assert(particleParamsDescriptorSet.isValid());
     
-        vk::DescriptorSet vkSet = drawParamsDescriptorSet.getVkSet();
-        cmd_buf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
-    }
-
-    size_t totalPCount = 0;
-    for (auto& e : emitters) {
-        e.sortParticles(cameraPosition);
-        totalPCount += e.particlesVec.size();
+        vk::DescriptorSet vkSet = particleParamsDescriptorSet.getVkSet();
+        cmd_buf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, renderPipeline.getVkPipelineLayout(), 0, 1, &vkSet, 0, nullptr);
     }
 
     sortEmitters(cameraPosition);
 
-    if (drawParams.capacity() < totalPCount) {
-        drawParams.reserve(totalPCount);
-    }
-    drawParams.clear();
-
-    ETNA_PROFILE_GPU(cmd_buf, drawParticles);
-
     for (uint32_t i = 0; i < emitters.size(); ++i) {
         const ParticleEmitter& e = emitters[i];
 
-        cmd_buf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.getVkPipeline());
+        cmd_buf.bindPipeline(vk::PipelineBindPoint::eGraphics, renderPipeline.getVkPipeline());
 
-        uint32_t firstInstance = uint32_t(drawParams.size());
-        uint32_t draws = 0;
-
-        for (size_t j = 0; j < e.particlesVec.size(); ++j) {
-            auto& p = e.particlesVec[j];
-
-            if (!e.isParticleAlive(int(j))) {
-                continue;
-            }
-
-            float alpha = p.timeToLive / e.particleLifetime;
-            drawParams.push_back({
-                glm::vec4(p.pos, p.angle),
-                e.startColor * alpha + e.endColor * (1 - alpha)
-            });
-
-            ++draws;
-        }
+        uint32_t firstInstance = e.whichPlaceOccupies * PARTICLES_PER_EMITTER;
 
         {
-            PushConsts pc{
+            RenderPushConsts pc{
                 glm::vec4(cameraPosition, 1),
                 view_proj
             };
     
             cmd_buf.pushConstants(
-                pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eVertex,
+                renderPipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eVertex,
                 0, sizeof(pc), &pc
             );
         }
 
-        cmd_buf.draw(6, draws, 0, firstInstance);
-    }
+        // transferHelper.uploadBuffer<ParticleEmitter::Particle>(*oneShotCommands, particleParamsBuffer, i * PARTICLES_PER_EMITTER * sizeof(ParticleEmitter::Particle), e.particleParams);
 
-    transferHelper.uploadBuffer<DrawParams>(*oneShotCommands, drawParamsBuffer, 0, drawParams);
+        cmd_buf.draw(6, PARTICLES_PER_EMITTER, 0, firstInstance);
+    }
 }
+
+#undef GLM_SWIZZLE
