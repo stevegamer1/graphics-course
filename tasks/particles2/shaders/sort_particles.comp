@@ -1,0 +1,76 @@
+#version 430
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform params_t {
+    vec4 cameraPosAnd1Padding;
+    uvec4 firstParticleIndexAndParticlesNumberAnd2Padding;
+} params;
+
+struct ParticleParams {
+    vec4 posAndAngle;
+    vec4 velocityAndTimeToLiveRelative;
+};
+
+layout(set = 0, binding = 0) buffer particleParams {
+    ParticleParams particle_params[];
+};
+
+layout(set = 1, binding = 0) buffer aliveCount {
+    uint alive_count;
+};
+
+float life(in ParticleParams p) {
+    return p.velocityAndTimeToLiveRelative.w;
+}
+
+float camDist(in ParticleParams p) {
+    return length(params.cameraPosAnd1Padding.xyz - p.posAndAngle.xyz);
+}
+
+void main() {
+    uint begin = params.firstParticleIndexAndParticlesNumberAnd2Padding.x;
+    uint pnum = params.firstParticleIndexAndParticlesNumberAnd2Padding.y;
+    uint end = begin + pnum;
+
+    // First pass: count alive particles
+    uint alive_count_tmp = 0;
+    for (uint i = begin; i < end; i++) {
+        if (life(particle_params[i]) > 0) {
+            alive_count_tmp++;
+        }
+    }
+    alive_count = alive_count_tmp;
+
+    // Second pass: simple odd-even sort
+    for (uint pass = 0; pass < pnum; pass++) {
+        bool evenPass = (pass % 2) == 0;
+        
+        for (uint j = begin + (evenPass ? 0 : 1); j + 1 < end; j += 2) {
+            bool shouldSwap = false;
+            
+            float lifeA = life(particle_params[j]);
+            float lifeB = life(particle_params[j + 1]);
+            
+            // Case 1: Move alive particles to front
+            if (lifeA <= 0 && lifeB > 0) {
+                shouldSwap = true;
+            }
+            // Case 2: Both alive - sort by distance
+            else if (lifeA > 0 && lifeB > 0) {
+                shouldSwap = camDist(particle_params[j]) < camDist(particle_params[j + 1]);
+            }
+            
+            if (shouldSwap) {
+                // Swap particles
+                ParticleParams temp = particle_params[j];
+                particle_params[j] = particle_params[j + 1];
+                particle_params[j + 1] = temp;
+            }
+        }
+        
+        // Ensure all writes complete before next pass
+        memoryBarrierBuffer();
+        barrier();
+    }
+}
