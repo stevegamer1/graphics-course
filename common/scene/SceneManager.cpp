@@ -328,22 +328,22 @@ void SceneManager::uploadData(
   
   images.clear();
   for (const tinygltf::Image& img : imges) {
-    images.emplace_back(std::move(etna::create_image_from_bytes(etna::Image::CreateInfo{
+    images.emplace_back(etna::create_image_from_bytes(etna::Image::CreateInfo{
         .extent = {static_cast<uint32_t>(img.width), static_cast<uint32_t>(img.height), 1},
         .name = img.name,
       },
       oneShotCommands->start(),
       img.image.data())
-    ));
+    );
   }
   unsigned char white_img[4] = {255, 255, 255, 255};
-  images.emplace_back(std::move(etna::create_image_from_bytes(etna::Image::CreateInfo{
+  images.emplace_back(etna::create_image_from_bytes(etna::Image::CreateInfo{
     .extent = {1, 1, 1},
     .name = "white_img",
   },
   oneShotCommands->start(),
   white_img)
-));
+);
 }
 
 void SceneManager::selectScene(std::filesystem::path path)

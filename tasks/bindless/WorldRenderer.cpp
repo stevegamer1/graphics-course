@@ -11,13 +11,13 @@ PlaceholderTextureManager::PlaceholderTextureManager(vk::CommandBuffer cmd_buf) 
   unsigned char white_img[4] = {255, 255, 255, 255};
   for (int i = 0; i < 32; ++i) {
     textures.emplace_back(
-      std::move(etna::create_image_from_bytes(etna::Image::CreateInfo{
+      etna::create_image_from_bytes(etna::Image::CreateInfo{
         .extent = {1, 1, 1},
         .name = "placeholder_img",
       },
       cmd_buf,
       white_img)
-    ));
+    );
   }
 }
 
