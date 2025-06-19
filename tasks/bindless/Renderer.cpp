@@ -40,11 +40,11 @@ void Renderer::initVulkan(std::span<const char*> instance_extensions)
 
   vk::PhysicalDeviceVulkan12Features features12 {
     .sType = vk::StructureType::ePhysicalDeviceVulkan12Features,
-    .pNext = NULL,
-    .shaderSampledImageArrayNonUniformIndexing = 1,
-    .descriptorBindingPartiallyBound = 1,
-    .descriptorBindingVariableDescriptorCount = 1,
-    .runtimeDescriptorArray = 1
+    .pNext = nullptr,
+    .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
+    .descriptorBindingPartiallyBound = VK_TRUE,
+    .descriptorBindingVariableDescriptorCount = VK_TRUE,
+    .runtimeDescriptorArray = VK_TRUE
   };
 
 
@@ -57,11 +57,11 @@ void Renderer::initVulkan(std::span<const char*> instance_extensions)
       .sType = vk::StructureType::ePhysicalDeviceFeatures2,
       .pNext = &features12,
       .features = {
-        .multiDrawIndirect = 1,
-        .shaderSampledImageArrayDynamicIndexing = 1
+        .multiDrawIndirect = VK_TRUE,
+        .shaderSampledImageArrayDynamicIndexing = VK_TRUE
       }
     },
-    .physicalDeviceIndexOverride = {},
+    .physicalDeviceIndexOverride = 0,
     .numFramesInFlight = 2,
   });
 }

@@ -1,4 +1,6 @@
+#include "tiny_gltf.h"
 #include "SceneManager.hpp"
+#include "scene/SceneManager.hpp"
 #include <stack>
 #include <spdlog/spdlog.h>
 #include <fmt/std.h>
@@ -6,6 +8,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <etna/GlobalContext.hpp>
 #include <etna/OneShotCmdMgr.hpp>
+#include <string>
 
 SceneManager::SceneManager()
   : oneShotCommands{etna::get_context().createOneShotCmdMgr()}
@@ -328,7 +331,9 @@ void SceneManager::uploadData(
   transferHelper.uploadBuffer<std::uint32_t>(*oneShotCommands, unifiedIbuf, 0, indices);
   
   images.clear();
+  int tmp = 0;
   for (const tinygltf::Image& img : imges) {
+    spdlog::info("add image {}, extent {} by {}", tmp++, img.width, img.height);
     images.emplace_back(etna::create_image_from_bytes(etna::Image::CreateInfo{
         .extent = {static_cast<uint32_t>(img.width), static_cast<uint32_t>(img.height), 1},
         .name = img.name,
@@ -412,6 +417,8 @@ SceneManager::ProcessedMeshes SceneManager::processMeshesCompressed(const tinygl
     result.relems.reserve(totalPrimitives);
   }
 
+  bool fallbackToOldGlossyExtension = false;
+
   result.meshes.reserve(model.meshes.size());
   for (const auto& mesh : model.meshes)
   {
@@ -448,10 +455,25 @@ SceneManager::ProcessedMeshes SceneManager::processMeshesCompressed(const tinygl
         hasTangents ? &model.accessors[accessorIndices[3]] : nullptr,
         hasTexcoord ? &model.accessors[accessorIndices[4]] : nullptr,
       };
-      Material mat =
-        prim.material == -1 ?
-          Material::none()
-        : Material(static_cast<Material::ImageId>(model.materials[prim.material].pbrMetallicRoughness.baseColorTexture.index));
+
+      Material mat= Material::none();
+      if (prim.material != -1) {
+        const tinygltf::Material& gltfMat = model.materials[prim.material];
+        int modernMatIndex = gltfMat.pbrMetallicRoughness.baseColorTexture.index;
+
+        if (modernMatIndex != -1) {
+          mat = Material(static_cast<Material::ImageId>(modernMatIndex));
+        } else if (gltfMat.extensions.count(SPECULAR_GLOSSINESS_EXTENSION_NAME)) {
+          fallbackToOldGlossyExtension = true;
+          const tinygltf::Value& ext = gltfMat.extensions.at(SPECULAR_GLOSSINESS_EXTENSION_NAME);
+          
+          if (ext.Has("diffuseTexture")) {
+            int diffuseTexIndex = ext.Get("diffuseTexture").Get("index").Get<int>();
+            mat = Material(static_cast<Material::ImageId>(diffuseTexIndex));
+          }
+        }
+      }
+
       result.relems.push_back(RenderElement{
         .vertexOffset = static_cast<std::uint32_t>(model.bufferViews[accessors[1]->bufferView].byteOffset / sizeof(Vertex)),
         .indexOffset = static_cast<std::uint32_t>((model.bufferViews[accessors[0]->bufferView].byteOffset - indexStart) / sizeof(uint32_t)),
@@ -462,6 +484,11 @@ SceneManager::ProcessedMeshes SceneManager::processMeshesCompressed(const tinygl
       ETNA_VERIFY(model.bufferViews[accessors[0]->bufferView].byteStride == 0);
     }
   }
+
+  if (fallbackToOldGlossyExtension) {
+    spdlog::warn("glTF: Using old {} extension, not the new pbrMetallicRoughness", SPECULAR_GLOSSINESS_EXTENSION_NAME);
+  }
+
   return result;
 }
 

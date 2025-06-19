@@ -1,7 +1,7 @@
 #pragma once
 #include <filesystem>
 #include <glm/glm.hpp>
-#include <tiny_gltf.h>
+#include "tiny_gltf.h"
 #include <etna/Etna.hpp>
 #include <etna/Buffer.hpp>
 #include <etna/BlockingTransferHelper.hpp>
@@ -95,4 +95,6 @@ private:
   etna::Buffer unifiedVbuf;
   etna::Buffer unifiedIbuf;
   std::vector<etna::Image> images;
+
+  const char* SPECULAR_GLOSSINESS_EXTENSION_NAME = "KHR_materials_pbrSpecularGlossiness";
 };
