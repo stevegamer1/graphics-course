@@ -1,0 +1,87 @@
+#version 450
+
+layout(local_size_x = 16) in;
+
+
+layout(push_constant) uniform params_t
+{
+  mat4 mProjView;
+} params;
+
+layout(binding = 0) readonly buffer DrawParams
+{
+  mat4 mModel[];
+} drawParams;
+
+struct AABB
+{
+  vec4 min;
+  vec4 max;
+};
+
+layout(binding = 1) readonly buffer AABBs
+{
+  AABB boxes[];
+} aabbs;
+
+
+struct IndirectDrawCommand {
+  uint    indexCount;
+  uint    instanceCount;
+  uint    firstIndex;
+  int     vertexOffset;
+  uint    firstInstance;
+};
+
+layout(binding = 2) buffer Commands {
+  IndirectDrawCommand commands[];
+} commands;
+
+layout(binding = 3) writeonly buffer DrawParamsIndices {
+  uint indices[];
+} drawParamsIndices;
+
+layout(binding = 4) readonly buffer CommandIndices {
+  uint commandIndices[];
+} commandIndices;
+
+AABB TransformAABB(AABB aabb) {
+  uint gID = gl_GlobalInvocationID.x;
+
+  AABB result;
+  result.min = vec4(vec3(+1.0f / 0.0f), 1.0f);
+  result.max = vec4(vec3(-1.0f / 0.0f), 1.0f);
+
+  for (int x = 0; x < 2; ++x) {
+    for (int y = 0; y < 2; ++y) {
+      for (int z = 0; z < 2; ++z) {
+        vec3 choice = vec3(x, y, z);
+        vec3 point = choice * aabb.min.xyz + (vec3(1) - choice) * aabb.max.xyz;
+        vec4 transformed = params.mProjView * drawParams.mModel[gID] * vec4(point, 1.0f);
+        transformed /= transformed.w;
+        result.min = min(result.min, transformed);
+        result.max = max(result.max, transformed);
+      }
+    }
+  }
+  return result;
+}
+
+bool IntersectsFrustum(AABB aabb) {
+  aabb = TransformAABB(aabb);
+  ivec3 min_below_one = ivec3(step(aabb.min.xyz, vec3(1)));
+  ivec3 max_above_minus_one = ivec3(step(vec3(-1), aabb.max.xyz));
+  int number_of_dimensions_where_aabb_intersects_frustum = int(dot(ivec3(1), min_below_one * max_above_minus_one));
+  return number_of_dimensions_where_aabb_intersects_frustum == 3;
+}
+
+void main(void)
+{
+  uint gID = gl_GlobalInvocationID.x;
+  AABB aabb = aabbs.boxes[gID];
+
+  if (IntersectsFrustum(aabb)) {
+    uint index = atomicAdd(commands.commands[commandIndices.commandIndices[gID]].instanceCount, 1);
+    drawParamsIndices.indices[index] = gID;
+  }
+}
