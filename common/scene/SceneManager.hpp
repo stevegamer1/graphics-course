@@ -50,7 +50,20 @@ public:
   vk::Buffer getVertexBuffer() { return unifiedVbuf.get(); }
   vk::Buffer getIndexBuffer() { return unifiedIbuf.get(); }
 
+  etna::Buffer& getVertexBufferEtna() { return unifiedVbuf; }
+  etna::Buffer& getIndexBufferEtna() { return unifiedIbuf; }
+
   etna::VertexByteStreamFormatDescription getVertexFormatDescription();
+
+  struct Vertex
+  {
+    // First 3 floats are position, 4th float is a packed normal
+    glm::vec4 positionAndNormal;
+    // First 2 floats are tex coords, 3rd is a packed tangent, 4th is padding
+    glm::vec4 texCoordAndTangentAndPadding;
+  };
+
+  static_assert(sizeof(Vertex) == sizeof(float) * 8);
 
 private:
   std::optional<tinygltf::Model> loadModel(std::filesystem::path path);
@@ -62,16 +75,6 @@ private:
   };
 
   ProcessedInstances processInstances(const tinygltf::Model& model) const;
-
-  struct Vertex
-  {
-    // First 3 floats are position, 4th float is a packed normal
-    glm::vec4 positionAndNormal;
-    // First 2 floats are tex coords, 3rd is a packed tangent, 4th is padding
-    glm::vec4 texCoordAndTangentAndPadding;
-  };
-
-  static_assert(sizeof(Vertex) == sizeof(float) * 8);
 
   struct ProcessedMeshes
   {

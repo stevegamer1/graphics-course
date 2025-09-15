@@ -3,9 +3,14 @@
 layout(local_size_x = 16) in;
 
 
+struct Frustum {
+  vec4 planes[6];  // near, far, left, right, top, bottom
+};
+
 layout(push_constant) uniform params_t
 {
-  mat4 mProjView;
+  Frustum camera_frustum;
+  uint instances_count;
 } params;
 
 layout(binding = 0) readonly buffer DrawParams
@@ -45,43 +50,54 @@ layout(binding = 4) readonly buffer CommandIndices {
   uint commandIndices[];
 } commandIndices;
 
-AABB TransformAABB(AABB aabb) {
-  uint gID = gl_GlobalInvocationID.x;
 
-  AABB result;
-  result.min = vec4(vec3(+1.0f / 0.0f), 1.0f);
-  result.max = vec4(vec3(-1.0f / 0.0f), 1.0f);
-
-  for (int x = 0; x < 2; ++x) {
-    for (int y = 0; y < 2; ++y) {
-      for (int z = 0; z < 2; ++z) {
-        vec3 choice = vec3(x, y, z);
-        vec3 point = choice * aabb.min.xyz + (vec3(1) - choice) * aabb.max.xyz;
-        vec4 transformed = params.mProjView * drawParams.mModel[gID] * vec4(point, 1.0f);
-        transformed /= transformed.w;
-        result.min = min(result.min, transformed);
-        result.max = max(result.max, transformed);
-      }
-    }
-  }
-  return result;
+bool isInFront(vec3 point, vec4 plane) {
+  float a = dot(plane.xyz, point);
+  return a >= plane.w;
 }
 
 bool IntersectsFrustum(AABB aabb) {
-  aabb = TransformAABB(aabb);
-  ivec3 min_below_one = ivec3(step(aabb.min.xyz, vec3(1)));
-  ivec3 max_above_minus_one = ivec3(step(vec3(-1), aabb.max.xyz));
-  int number_of_dimensions_where_aabb_intersects_frustum = int(dot(ivec3(1), min_below_one * max_above_minus_one));
-  return number_of_dimensions_where_aabb_intersects_frustum == 3;
+  uint gID = gl_GlobalInvocationID.x;
+  for (int plane_i = 0; plane_i < 1; ++plane_i) {
+    bool have_in_front = false;
+
+    for (int x = 0; x < 2; ++x) {
+      for (int y = 0; y < 2; ++y) {
+        for (int z = 0; z < 2; ++z) {
+          vec3 choice = vec3(x, y, z);
+          vec3 point = mix(aabb.min.xyz, aabb.max.xyz, choice);
+          vec4 transformed = drawParams.mModel[gID] * vec4(point, 1.0f);
+          transformed /= transformed.w;
+
+          if (isInFront(transformed.xyz, params.camera_frustum.planes[plane_i])) {
+            have_in_front = true;
+          }
+        }
+      }
+    }
+
+    if (!have_in_front) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 void main(void)
 {
   uint gID = gl_GlobalInvocationID.x;
-  AABB aabb = aabbs.boxes[gID];
+  if (gID >= params.instances_count) {
+    return;
+  }
+
+  // Command indices are also relem indices.
+  uint command_index = commandIndices.commandIndices[gID];
+  AABB aabb = aabbs.boxes[command_index];
 
   if (IntersectsFrustum(aabb)) {
-    uint index = atomicAdd(commands.commands[commandIndices.commandIndices[gID]].instanceCount, 1);
-    drawParamsIndices.indices[index] = gID;
+    uint index = atomicAdd(commands.commands[command_index].instanceCount, 1);
+    uint offset = commands.commands[command_index].firstInstance;
+    drawParamsIndices.indices[offset + index] = gID;
   }
 }

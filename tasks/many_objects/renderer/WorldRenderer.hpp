@@ -13,6 +13,7 @@
 
 #include "etna/GpuSharedResource.hpp"
 #include "scene/SceneManager.hpp"
+#include "stages/AABBCalculator.hpp"
 #include "stages/CullingManager.hpp"
 #include "stages/IndirectDrawManager.hpp"
 #include "stages/SynchronizedBuffer.hpp"
@@ -38,12 +39,15 @@ public:
   void renderWorld(
     vk::CommandBuffer cmd_buf, vk::Image target_image, vk::ImageView target_image_view);
 
+  void markSceneDirty() { sceneDirty = true; }
+  void markAABBsDirty() { aabbsDirty = true; }
+
 private:
   void renderScene(
     vk::CommandBuffer cmd_buf, const glm::mat4x4& glob_tm, vk::Image target_image, vk::ImageView target_image_view);
 
   void cullMeshes(
-    vk::CommandBuffer cmd_buf, const glm::mat4x4& glob_tm);
+    vk::CommandBuffer cmd_buf, const Camera& camera);
 
   void recreateAndUploadBuffersIfNecessary(vk::CommandBuffer cmd_buf);
 
@@ -71,9 +75,6 @@ private:
   BuffersForDrawIndexedIndirectCount prepareDrawParamsBuffersOnCPU();
   BuffersForCulling prepareCullingBuffersOnCPU(const std::vector<vk::DrawIndexedIndirectCommand>& commands);
 
-  // void simpleBufferSynchronizeAfterUpload(vk::CommandBuffer cmd_buf, vk::Buffer buffer);
-  // void simpleBufferSynchronizeAfterCompute(vk::CommandBuffer cmd_buf, vk::Buffer buffer);
-
   void recreateDrawParamsBuffers(uint32_t count);
   void recreateIndirectCommandsBuffer(uint32_t count);
   void createIndirectCommandCountBuffer();
@@ -83,14 +84,6 @@ private:
   template <typename Element>
   void uploadBuffer(const std::vector<Element>& source, SynchronizedBuffer& destination, vk::CommandBuffer cmd_buf);
 
-  // void uploadDrawParamsBuffer(const std::vector<SingleRelemDrawParams>& source, vk::CommandBuffer cmd_buf);
-  // void uploadIndirectDrawCommands(const std::vector<vk::DrawIndexedIndirectCommand>& source, vk::CommandBuffer cmd_buf);
-  // void uploadIndirectCommandCount(uint32_t count, vk::CommandBuffer cmd_buf);
-  // void uploadAABBs(const std::vector<AABB>& source, vk::CommandBuffer cmd_buf);
-  // void uploadInstancesToCommandsMapBuffer(const std::vector<uint32_t>& source, vk::CommandBuffer cmd_buf);
-
-  AABB calculateAABB(const RenderElement& relem);
-  void recalculateAABBsCPU(vk::CommandBuffer cmd_buf);
   void recalculateAABBs(vk::CommandBuffer cmd_buf);
 
 private:
@@ -103,26 +96,16 @@ private:
   etna::GpuSharedResource<SynchronizedBuffer> indirectCommandsBuffer;
   etna::GpuSharedResource<SynchronizedBuffer> indirectCommandsCountBuffer;
 
-  // struct StaticMeshPipelinePushConstants
-  // {
-  //   glm::mat4x4 projView;
-  // };
-
-  // struct CullPipelinePushConstants
-  // {
-  //   glm::mat4x4 projView;
-  // };
-
   glm::mat4x4 worldViewProj;
+  Camera cameraCopy;
   glm::mat4x4 lightMatrix;
 
-  // etna::GraphicsPipeline staticMeshPipeline{};
-  // const char* STATIC_MESH_PROGRAM_NAME = "static_mesh_program";
-
-  // etna::ComputePipeline cullPipeline{};
   CullingManager culler;
   IndirectDrawManager drawer;
-
+  AABBCalculator aabbCalculator;
 
   glm::uvec2 resolution;
+
+  bool aabbsDirty = true;
+  bool sceneDirty = true;
 };

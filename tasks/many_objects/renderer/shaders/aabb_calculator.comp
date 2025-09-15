@@ -1,0 +1,81 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// #include "structs.glsl"
+
+layout(local_size_x = 16) in;
+
+
+layout(push_constant) uniform params_t {
+  uint aabbs_count;
+  uint vertex_size_in_bytes;
+} params;
+
+struct AABB
+{
+  vec4 min;
+  vec4 max;
+};
+
+layout(binding = 0) writeonly buffer AABBs
+{
+  AABB boxes[];
+} aabbs;
+
+
+struct IndirectDrawCommand {
+  uint    indexCount;
+  uint    instanceCount;
+  uint    firstIndex;
+  int     vertexOffset;
+  uint    firstInstance;
+};
+
+layout(binding = 1) readonly buffer Commands {
+  IndirectDrawCommand commands[];
+} commands;
+
+
+struct Vertex {
+  vec3 wPos;
+  vec3 wNorm;
+  vec3 wTangent;
+  vec2 texCoord;
+};
+
+layout(binding = 2) readonly buffer Vertices
+{
+  Vertex vertices[];
+} vertices;
+
+layout(binding = 3) readonly buffer Indices
+{
+  uint indices[];
+} indices;
+
+const float PLUS_INF = +1.0f / 0.0f;
+const float MINUS_INF = -1.0f / 0.0f;
+
+
+void main(void)
+{
+  uint gID = gl_GlobalInvocationID.x;
+  if (gID >= params.aabbs_count) {
+    return;
+  }
+
+  AABB result;
+  result.min = vec4(vec3(PLUS_INF), 1.0f);
+  result.max = vec4(vec3(MINUS_INF), 1.0f);
+  IndirectDrawCommand command = commands.commands[gID];
+
+  for (int i = 0; i < command.indexCount; ++i) {
+    uint index = indices.indices[command.firstIndex + i];
+    uint vertex_offset = command.vertexOffset / params.vertex_size_in_bytes;
+    vec3 vertex = vertices.vertices[vertex_offset + index].wPos;
+    result.min.xyz = min(vertex, result.min.xyz);
+    result.max.xyz = max(vertex, result.max.xyz);
+  }
+
+  aabbs.boxes[gID] = result;
+}

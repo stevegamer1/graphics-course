@@ -1,6 +1,7 @@
 #include "IndirectDrawManager.hpp"
 #include "SynchronizedBuffer.hpp"
 #include <vulkan/vulkan_enums.hpp>
+#include "etna/DescriptorSet.hpp"
 #include "etna/Etna.hpp"
 #include "etna/PipelineManager.hpp"
 #include "etna/RenderTargetStates.hpp"
@@ -45,7 +46,8 @@ void IndirectDrawManager::createPipeline(
     });
 }
 
-void IndirectDrawManager::createDepthImage(glm::uvec2 resolution) {
+void IndirectDrawManager::createDepthImage(glm::uvec2 resolution)
+{
   mainViewDepth = etna::get_context().createImage(etna::Image::CreateInfo{
     .extent = vk::Extent3D{resolution.x, resolution.y, 1},
     .name = "main_view_depth",
@@ -57,10 +59,8 @@ void IndirectDrawManager::createDepthImage(glm::uvec2 resolution) {
 void IndirectDrawManager::run(
   vk::CommandBuffer cmd_buf,
   SynchronizedBuffer& draw_params,
-  SynchronizedBuffer& aabbs,
   SynchronizedBuffer& indirect_commands,
   SynchronizedBuffer& draw_params_indices,
-  SynchronizedBuffer& command_indices,
   SynchronizedBuffer& commands_count,
   vk::Image target_image,
   vk::ImageView target_image_view,
@@ -82,8 +82,6 @@ void IndirectDrawManager::run(
   };
   draw_params.syncBeforeUsage(graphicsUsage, cmd_buf);
   draw_params_indices.syncBeforeUsage(graphicsUsage, cmd_buf);
-  command_indices.syncBeforeUsage(graphicsUsage, cmd_buf);
-  aabbs.syncBeforeUsage(graphicsUsage, cmd_buf);
   indirect_commands.syncBeforeUsage(graphicsUsage, cmd_buf);
   commands_count.syncBeforeUsage(graphicsUsage, cmd_buf);
 
@@ -99,39 +97,30 @@ void IndirectDrawManager::run(
     cmd_buf.bindVertexBuffers(0, {vertex_buffer}, {0});
     cmd_buf.bindIndexBuffer(index_buffer, 0, vk::IndexType::eUint32);
 
-  {
-    auto programInfo = etna::get_shader_program(PROGRAM_NAME);
+    {
+      auto programInfo = etna::get_shader_program(PROGRAM_NAME);
 
-    auto set = etna::create_descriptor_set(
-      programInfo.getDescriptorLayoutId(0),
-      cmd_buf,
-      {etna::Binding{0, draw_params.buffer.genBinding()}}
-    );
+      auto set = etna::create_descriptor_set(
+        programInfo.getDescriptorLayoutId(0),
+        cmd_buf,
+        {etna::Binding{0, draw_params.buffer.genBinding()},
+         etna::Binding(1, draw_params_indices.buffer.genBinding())});
 
-    cmd_buf.bindDescriptorSets(
-      vk::PipelineBindPoint::eGraphics,
-      pipeline.getVkPipelineLayout(),
-      0,
-      {set.getVkSet()},
-      {}
-    );
-  }
+      cmd_buf.bindDescriptorSets(
+        vk::PipelineBindPoint::eGraphics, pipeline.getVkPipelineLayout(), 0, {set.getVkSet()}, {});
+    }
 
-  PushConstants pushConst{
-    .projView = proj_view
-  };
-  cmd_buf.pushConstants<PushConstants>(
-    pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eVertex, 0, {pushConst});
+    PushConstants pushConst{.projView = proj_view};
+    cmd_buf.pushConstants<PushConstants>(
+      pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eVertex, 0, {pushConst});
 
-  etna::flush_barriers(cmd_buf);
-  cmd_buf.drawIndexedIndirectCount(
-    indirect_commands.buffer.get(),
-    vk::DeviceSize(0),
-    commands_count.buffer.get(),
-    vk::DeviceSize(0),
-    uint32_t(relems_count),
-    uint32_t(sizeof(vk::DrawIndexedIndirectCommand))
-  );
-
+    etna::flush_barriers(cmd_buf);
+    cmd_buf.drawIndexedIndirectCount(
+      indirect_commands.buffer.get(),
+      vk::DeviceSize(0),
+      commands_count.buffer.get(),
+      vk::DeviceSize(0),
+      uint32_t(relems_count),
+      uint32_t(sizeof(vk::DrawIndexedIndirectCommand)));
   }
 }

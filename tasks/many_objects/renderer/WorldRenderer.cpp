@@ -1,6 +1,7 @@
 #include "WorldRenderer.hpp"
 #include "etna/Buffer.hpp"
 #include "etna/Image.hpp"
+#include "stages/CullingManager.hpp"
 #include "stages/SynchronizedBuffer.hpp"
 
 #include <cstdint>
@@ -10,6 +11,9 @@
 #include <etna/RenderTargetStates.hpp>
 #include <etna/Profiling.hpp>
 #include <glm/ext.hpp>
+#include <glm/ext/quaternion_geometric.hpp>
+#include <glm/fwd.hpp>
+#include <glm/matrix.hpp>
 #include <utility>
 #include <vector>
 #include <vulkan/vulkan_core.h>
@@ -43,14 +47,16 @@ void WorldRenderer::loadScene(std::filesystem::path path)
 
 void WorldRenderer::loadShaders()
 {
+  aabbCalculator.loadShader();
   culler.loadShader();
   drawer.loadShader();
 }
 
 void WorldRenderer::setupPipelines(vk::Format swapchain_format)
 {
-  drawer.createPipeline(swapchain_format, sceneMgr->getVertexFormatDescription());
+  aabbCalculator.createPipeline();
   culler.createPipeline();
+  drawer.createPipeline(swapchain_format, sceneMgr->getVertexFormatDescription());
 }
 
 void WorldRenderer::debugInput(const Keyboard&) {}
@@ -63,6 +69,7 @@ void WorldRenderer::update(const FramePacket& packet)
   {
     const float aspect = float(resolution.x) / float(resolution.y);
     worldViewProj = packet.mainCam.projTm(aspect) * packet.mainCam.viewTm();
+    cameraCopy = packet.mainCam;
   }
 }
 
@@ -88,7 +95,7 @@ void WorldRenderer::recreateDrawParamsBuffers(uint32_t count) {
 }
 
 void WorldRenderer::recreateIndirectCommandsBuffer(uint32_t count) {
-  size_t size = sizeof(SingleRelemDrawParams) * count;
+  size_t size = sizeof(vk::DrawIndexedIndirectCommand) * count;
   indirectCommandsBuffer.get().buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
     .size = size,
     .bufferUsage = vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer,
@@ -143,24 +150,13 @@ void WorldRenderer::uploadBuffer(const std::vector<Element>& source, Synchronize
   destination.buffer.unmap();
 }
 
-WorldRenderer::AABB WorldRenderer::calculateAABB(const RenderElement&) {
-  AABB result;
-
-  result.min = glm::vec4(-100);
-  result.max = glm::vec4(+100);
-
-  return result;
-}
-
-void WorldRenderer::recalculateAABBsCPU(vk::CommandBuffer cmd_buf) {
-  auto relems = sceneMgr->getRenderElements();
-  std::vector<AABB> aabbs(relems.size());
-
-  for (size_t i = 0; i < relems.size(); ++i) {
-    aabbs[i] = calculateAABB(relems[i]);
-  }
-
-  uploadBuffer(aabbs, aabbBuffer.get(), cmd_buf);
+void WorldRenderer::recalculateAABBs(vk::CommandBuffer cmd_buf) {
+  aabbCalculator.run(cmd_buf,
+    aabbBuffer.get(),
+    indirectCommandsBuffer.get(),
+    sceneMgr->getVertexBufferEtna(),
+    sceneMgr->getIndexBufferEtna(),
+    uint32_t(sceneMgr->getRenderElements().size()));
 }
 
 std::map<WorldRenderer::RelemID, std::vector<WorldRenderer::SingleRelemDrawParams>> WorldRenderer::collectRelemsDrawParamsForIndirect() {
@@ -222,62 +218,103 @@ WorldRenderer::BuffersForCulling WorldRenderer::prepareCullingBuffersOnCPU(const
 }
 
 void WorldRenderer::recreateAndUploadBuffersIfNecessary(vk::CommandBuffer cmd_buf) {
-  BuffersForDrawIndexedIndirectCount cpuBuffersForIndirectDraw = prepareDrawParamsBuffersOnCPU();
-  BuffersForCulling cullingBuffers = prepareCullingBuffersOnCPU(cpuBuffersForIndirectDraw.commands);
+  uint32_t instancesCount = uint32_t(sceneMgr->getInstanceMeshes().size());
+  uint32_t relemsCount = uint32_t(sceneMgr->getRenderElements().size());
 
   {
-    uint32_t desiredDrawParamsCount = uint32_t(cpuBuffersForIndirectDraw.draw_params.size());
+    uint32_t desiredDrawParamsCount = instancesCount;
     uint32_t currentCount = uint32_t(drawParams.get().current_size / sizeof(SingleRelemDrawParams));
     if (currentCount < desiredDrawParamsCount) {
       recreateDrawParamsBuffers(desiredDrawParamsCount);
+      markSceneDirty();
     }
-    uploadBuffer(cpuBuffersForIndirectDraw.draw_params, drawParams.get(), cmd_buf);
   }
 
   {
-    uint32_t desiredInstancesToCommandsMapEntryCount = uint32_t(cpuBuffersForIndirectDraw.draw_params.size());
+    uint32_t desiredInstancesToCommandsMapEntryCount = instancesCount;
     uint32_t currentCount = uint32_t(instanceMeshToIndirectCommandMap.get().current_size / sizeof(uint32_t));
     if (currentCount < desiredInstancesToCommandsMapEntryCount) {
       recreateInstancesToCommandsMapBuffer(desiredInstancesToCommandsMapEntryCount);
+      markSceneDirty();
     }
-    uploadBuffer(cullingBuffers.instanceToIndirectCommandMap, instanceMeshToIndirectCommandMap.get(), cmd_buf);
   }
 
   {
-    uint32_t desiredCommandsCount = uint32_t(cpuBuffersForIndirectDraw.commands.size());
+    uint32_t desiredCommandsCount = relemsCount;
     uint32_t currentCount = uint32_t(indirectCommandsBuffer.get().current_size / sizeof(vk::DrawIndexedIndirectCommand));
     if (currentCount < desiredCommandsCount) {
       recreateIndirectCommandsBuffer(desiredCommandsCount);
+      markSceneDirty();
     }
-    uploadBuffer(cpuBuffersForIndirectDraw.commands, indirectCommandsBuffer.get(), cmd_buf);
   }
 
   {
     if (indirectCommandsCountBuffer.get().current_size == 0) {
       createIndirectCommandCountBuffer();
+      markSceneDirty();
     }
-    std::vector<uint32_t> countVector{uint32_t(cpuBuffersForIndirectDraw.commands.size())};
-    uploadBuffer(countVector, indirectCommandsCountBuffer.get(), cmd_buf);
   }
 
   {
-    uint32_t desiredAABBCount = uint32_t(cpuBuffersForIndirectDraw.draw_params.size());
-    uint32_t currentCount = uint32_t(aabbBuffer.get().current_size / sizeof(uint32_t));
+    uint32_t desiredAABBCount = relemsCount;
+    uint32_t currentCount = uint32_t(aabbBuffer.get().current_size / sizeof(AABB));
     if (currentCount < desiredAABBCount) {
       recreateAABBBuffer(desiredAABBCount);
-    }
-    recalculateAABBsCPU(cmd_buf);
+      markAABBsDirty();
+    } 
+  }
+
+  if (sceneDirty) {
+    BuffersForDrawIndexedIndirectCount cpuBuffersForIndirectDraw = prepareDrawParamsBuffersOnCPU();
+    BuffersForCulling cullingBuffers = prepareCullingBuffersOnCPU(cpuBuffersForIndirectDraw.commands);
+
+    uploadBuffer(cpuBuffersForIndirectDraw.draw_params, drawParams.get(), cmd_buf);
+
+    uploadBuffer(cullingBuffers.instanceToIndirectCommandMap, instanceMeshToIndirectCommandMap.get(), cmd_buf);
+
+    uploadBuffer(cpuBuffersForIndirectDraw.commands, indirectCommandsBuffer.get(), cmd_buf);
+
+    std::vector<uint32_t> countVector{uint32_t(cpuBuffersForIndirectDraw.commands.size())};
+    uploadBuffer(countVector, indirectCommandsCountBuffer.get(), cmd_buf);
+
+    sceneDirty = false;
+  }
+
+  if (aabbsDirty) {
+    recalculateAABBs(cmd_buf);
+    aabbsDirty = false;
   }
 }
 
-void WorldRenderer::cullMeshes(vk::CommandBuffer cmd_buf, const glm::mat4x4& glob_tm) {
+// matrix is forward transformation matrix.
+glm::vec4 transform_plane(glm::vec4 plane, glm::mat4 matrix) {
+  glm::vec4 resultXYZ4 = glm::normalize(matrix * glm::vec4(plane.x, plane.y, plane.z, 0.0f));
+
+  glm::vec4 pointOnPlane(plane.x * plane.w, plane.y * plane.w, plane.z * plane.w, 1.0f);
+  float resultW = glm::dot(matrix * pointOnPlane, resultXYZ4);
+
+  return glm::vec4(resultXYZ4.x, resultXYZ4.y, resultXYZ4.z, resultW);
+}
+
+
+void WorldRenderer::cullMeshes(vk::CommandBuffer cmd_buf, const Camera& camera) {
+  CullingManager::Frustum frustum = CullingManager::getFrustum(camera.fov, camera.zNear, camera.zFar, float(resolution.x) / resolution.y);
+
+  glm::mat4x4 invView = cameraCopy.viewItm();
+  frustum.near = transform_plane(frustum.near, invView);
+  frustum.far = transform_plane(frustum.far, invView);
+  frustum.left = transform_plane(frustum.left, invView);
+  frustum.right = transform_plane(frustum.right, invView);
+  frustum.top = transform_plane(frustum.top, invView);
+  frustum.bottom = transform_plane(frustum.bottom, invView);
+
   culler.run(cmd_buf,
     drawParams.get(), 
     aabbBuffer.get(), 
     indirectCommandsBuffer.get(), 
     drawParamsCulledIndicesBuffer.get(), 
     instanceMeshToIndirectCommandMap.get(),
-    uint32_t(sceneMgr->getInstanceMeshes().size()), glob_tm);
+    uint32_t(sceneMgr->getInstanceMeshes().size()), frustum);
 }
 
 void WorldRenderer::renderScene(
@@ -288,10 +325,8 @@ void WorldRenderer::renderScene(
 
   drawer.run(cmd_buf,
     drawParams.get(),
-    aabbBuffer.get(),
     indirectCommandsBuffer.get(),
     drawParamsCulledIndicesBuffer.get(),
-    instanceMeshToIndirectCommandMap.get(),
     indirectCommandsCountBuffer.get(),
     target_image,
     target_image_view,
@@ -313,7 +348,7 @@ void WorldRenderer::renderWorld(
 
     recreateAndUploadBuffersIfNecessary(cmd_buf);
 
-    cullMeshes(cmd_buf, worldViewProj);
+    cullMeshes(cmd_buf, cameraCopy);
 
     renderScene(cmd_buf, worldViewProj, target_image, target_image_view);
 
