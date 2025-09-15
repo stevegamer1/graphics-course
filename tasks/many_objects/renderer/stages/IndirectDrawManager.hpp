@@ -32,10 +32,8 @@ public:
     vk::CommandBuffer cmd_buf,
 
     SynchronizedBuffer& draw_params,
-    SynchronizedBuffer& aabbs,
     SynchronizedBuffer& indirect_commands,
     SynchronizedBuffer& draw_params_indices,
-    SynchronizedBuffer& command_indices,
     SynchronizedBuffer& commands_count,
 
     vk::Image target_image,

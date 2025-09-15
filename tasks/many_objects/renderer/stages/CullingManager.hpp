@@ -23,6 +23,18 @@ public:
 
   void createPipeline();
 
+  struct Frustum {
+    glm::vec4 near;
+    glm::vec4 far;
+    glm::vec4 left;
+    glm::vec4 right;
+    glm::vec4 top;
+    glm::vec4 bottom;
+  };
+
+  // fov is in degrees, aspect is width/height.
+  static Frustum getFrustum(float fov, float near, float far, float aspect);
+
   // Synchronizes buffers by itself.
   void run(
     vk::CommandBuffer cmd_buf,
@@ -34,12 +46,13 @@ public:
     SynchronizedBuffer& command_indices,
 
     uint32_t instance_count,
-    glm::mat4 proj_view);
+    const Frustum& camera_frustum);
 
 private:
   struct PushConstants
   {
-    glm::mat4x4 projView;
+    Frustum camera_frustum;
+    uint32_t instances_to_cull_count;
   };
 
   etna::ComputePipeline pipeline;

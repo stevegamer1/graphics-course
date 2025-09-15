@@ -1,5 +1,8 @@
 #include "CullingManager.hpp"
 #include "SynchronizedBuffer.hpp"
+#include <cmath>
+#include <glm/ext/scalar_constants.hpp>
+#include <glm/fwd.hpp>
 #include <vulkan/vulkan_enums.hpp>
 #include "etna/Etna.hpp"
 #include "etna/PipelineManager.hpp"
@@ -33,9 +36,25 @@ void CullingManager::zeroOutInstanceCountsInCommands(
   indirect_commands.buffer.unmap();
 }
 
+CullingManager::Frustum CullingManager::getFrustum(float fov, float near, float far, float aspect) {
+    fov = fov / 180.0f * glm::pi<float>();
+
+    Frustum result;
+    float vfov = atan(tan(fov) / aspect);  // vertical fov
+
+    result.near = glm::vec4(0, 0, 1, near);
+    result.far = glm::vec4(0, 0, -1, -far);
+    result.left = glm::vec4(-cos(fov), 0, sin(fov), 0);
+    result.right = glm::vec4(cos(fov), 0, sin(fov), 0);
+    result.top = glm::vec4(0, -cos(vfov), sin(vfov), 0);
+    result.bottom = glm::vec4(0, cos(vfov), sin(vfov), 0);
+
+    return result;
+}
+
 void CullingManager::run(vk::CommandBuffer cmd_buf, SynchronizedBuffer& draw_params, SynchronizedBuffer& aabbs,
              SynchronizedBuffer& indirect_commands, SynchronizedBuffer& draw_params_indices,
-             SynchronizedBuffer& command_indices, uint32_t instance_count, glm::mat4 proj_view) {    
+             SynchronizedBuffer& command_indices, uint32_t instance_count, const Frustum& camera_frustum) {    
     zeroOutInstanceCountsInCommands(cmd_buf, indirect_commands);
 
     draw_params.syncBeforeUsage(BufferSyncUsage{
@@ -90,7 +109,8 @@ void CullingManager::run(vk::CommandBuffer cmd_buf, SynchronizedBuffer& draw_par
     );
 
     PushConstants pushConsts{
-        .projView = proj_view
+        .camera_frustum = camera_frustum,
+        .instances_to_cull_count = instance_count
     };
     cmd_buf.pushConstants<PushConstants>(
         pipeline.getVkPipelineLayout(),

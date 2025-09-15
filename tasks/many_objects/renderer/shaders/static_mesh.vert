@@ -18,6 +18,11 @@ layout(binding = 0) readonly buffer DrawParams
   mat4 mModel[];
 } drawParams;
 
+layout(binding = 1) readonly buffer DrawParamsIndices
+{
+  uint indices[];
+} drawParamsIndices;
+
 layout (location = 0 ) out VS_OUT
 {
   vec3 wPos;
@@ -33,7 +38,7 @@ void main(void)
   const vec4 wNorm = vec4(decode_normal(floatBitsToInt(vPosNorm.w)),     0.0f);
   const vec4 wTang = vec4(decode_normal(floatBitsToInt(vTexCoordAndTang.z)), 0.0f);
 
-  const mat4 mModel = drawParams.mModel[gl_InstanceIndex];
+  const mat4 mModel = drawParams.mModel[drawParamsIndices.indices[gl_InstanceIndex]];
 
   vOut.wPos   = (mModel * vec4(vPosNorm.xyz, 1.0f)).xyz;
   vOut.wNorm  = normalize(mat3(transpose(inverse(mModel))) * wNorm.xyz);

@@ -7,6 +7,7 @@ add_executable(many_objects_renderer
   stages/CullingManager.cpp
   stages/IndirectDrawManager.cpp
   stages/SynchronizedBuffer.cpp
+  stages/AABBCalculator.cpp
 )
 
 target_link_libraries(many_objects_renderer
@@ -16,4 +17,5 @@ target_add_shaders(many_objects_renderer
   shaders/static_mesh.frag
   shaders/static_mesh.vert
   shaders/cull.comp
+  shaders/aabb_calculator.comp
 )
