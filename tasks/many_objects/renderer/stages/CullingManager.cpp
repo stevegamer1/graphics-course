@@ -4,7 +4,10 @@
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/fwd.hpp>
 #include <vulkan/vulkan_enums.hpp>
+#include "etna/BlockingTransferHelper.hpp"
 #include "etna/Etna.hpp"
+#include "etna/GlobalContext.hpp"
+#include "etna/OneShotCmdMgr.hpp"
 #include "etna/PipelineManager.hpp"
 
 
@@ -18,22 +21,6 @@ void CullingManager::loadShader() {
 void CullingManager::createPipeline() {
     auto& pipelineManager = etna::get_context().getPipelineManager();
     pipeline = pipelineManager.createComputePipeline(PROGRAM_NAME, {});
-}
-
-void CullingManager::zeroOutInstanceCountsInCommands(
-  vk::CommandBuffer cmd_buf, SynchronizedBuffer& indirect_commands) {
-  indirect_commands.syncBeforeUsage(BufferSyncUsage{
-    .stageFlags = vk::PipelineStageFlagBits2::eHost,
-    .accessFlags = vk::AccessFlagBits2::eHostWrite
-  }, cmd_buf);
-
-  indirect_commands.buffer.map();
-  auto commands = reinterpret_cast<vk::DrawIndexedIndirectCommand*>(indirect_commands.buffer.data());
-  size_t count = indirect_commands.current_size / sizeof(vk::DrawIndexedIndirectCommand);
-  for (size_t i = 0; i < count; ++i) {
-    commands[i].instanceCount = 0;
-  }
-  indirect_commands.buffer.unmap();
 }
 
 CullingManager::Frustum CullingManager::getFrustum(float fov, float near, float far, float aspect) {
@@ -55,8 +42,6 @@ CullingManager::Frustum CullingManager::getFrustum(float fov, float near, float 
 void CullingManager::run(vk::CommandBuffer cmd_buf, SynchronizedBuffer& draw_params, SynchronizedBuffer& aabbs,
              SynchronizedBuffer& indirect_commands, SynchronizedBuffer& draw_params_indices,
              SynchronizedBuffer& command_indices, uint32_t instance_count, const Frustum& camera_frustum) {    
-    zeroOutInstanceCountsInCommands(cmd_buf, indirect_commands);
-
     draw_params.syncBeforeUsage(BufferSyncUsage{
         .stageFlags = vk::PipelineStageFlagBits2::eComputeShader,
         .accessFlags = vk::AccessFlagBits2::eShaderRead
@@ -81,7 +66,6 @@ void CullingManager::run(vk::CommandBuffer cmd_buf, SynchronizedBuffer& draw_par
         .stageFlags = vk::PipelineStageFlagBits2::eComputeShader,
         .accessFlags = vk::AccessFlagBits2::eShaderRead
     }, cmd_buf);
-
 
 
     cmd_buf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.getVkPipeline());

@@ -7,6 +7,9 @@
 
 
 void SynchronizedBuffer::syncBeforeUsage(BufferSyncUsage usage, vk::CommandBuffer cmd_buf) {
+    assert(!(usage.accessFlags & ANY_HOST_ACCESS));
+    assert(!(usage.stageFlags & vk::PipelineStageFlagBits2::eHost));
+
     if (previousUsages.stageFlags) {
         vk::BufferMemoryBarrier2 barrier {
             .srcStageMask = previousUsages.stageFlags,
@@ -27,9 +30,13 @@ void SynchronizedBuffer::syncBeforeUsage(BufferSyncUsage usage, vk::CommandBuffe
         assert(!bool(previousUsages.accessFlags));
     }
 
-    // todo: suboptimal. Need only synchronize with latest write accesses?
-    previousUsages.accessFlags |= usage.accessFlags;
-    previousUsages.stageFlags |= usage.stageFlags;
+    if (usage.accessFlags & DEVICE_WRITE_ACCESS) {
+        // Overwrites all previous results.
+        previousUsages = usage;
+    } else {
+        previousUsages.accessFlags |= usage.accessFlags;
+        previousUsages.stageFlags |= usage.stageFlags;
+    }
 }
 
 void SynchronizedBuffer::resetAccumulatedUsage() {

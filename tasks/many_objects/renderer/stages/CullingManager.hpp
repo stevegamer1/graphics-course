@@ -1,6 +1,8 @@
 #pragma once
 #include "SynchronizedBuffer.hpp"
+#include "etna/BlockingTransferHelper.hpp"
 #include "etna/ComputePipeline.hpp"
+#include "etna/OneShotCmdMgr.hpp"
 #include <etna/Vulkan.hpp>
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_enums.hpp>
@@ -57,7 +59,4 @@ private:
 
   etna::ComputePipeline pipeline;
   const char* PROGRAM_NAME = "cull_program";
-
-  void zeroOutInstanceCountsInCommands(
-    vk::CommandBuffer cmd_buf, SynchronizedBuffer& indirect_commands);
 };

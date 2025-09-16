@@ -95,6 +95,9 @@ void main(void)
   uint command_index = commandIndices.commandIndices[gID];
   AABB aabb = aabbs.boxes[command_index];
 
+  commands.commands[command_index].instanceCount = 0;
+  barrier();
+
   if (IntersectsFrustum(aabb)) {
     uint index = atomicAdd(commands.commands[command_index].instanceCount, 1);
     uint offset = commands.commands[command_index].firstInstance;

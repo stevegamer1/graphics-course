@@ -20,4 +20,15 @@ public:
     void resetAccumulatedUsage();
 private:
     BufferSyncUsage previousUsages;
+
+    static constexpr vk::AccessFlags2 ANY_HOST_ACCESS =
+        vk::AccessFlagBits2::eHostWrite | vk::AccessFlagBits2::eHostRead;
+
+    static constexpr vk::AccessFlags2 DEVICE_WRITE_ACCESS =
+        vk::AccessFlagBits2::eMemoryWrite |
+        vk::AccessFlagBits2::eShaderWrite |
+        vk::AccessFlagBits2::eTransferWrite |
+        vk::AccessFlagBits2::eColorAttachmentWrite |
+        vk::AccessFlagBits2::eDepthStencilAttachmentWrite |
+        vk::AccessFlagBits2::eShaderStorageWrite;
 };
