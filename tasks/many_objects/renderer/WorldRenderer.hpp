@@ -7,11 +7,14 @@
 #include <etna/GraphicsPipeline.hpp>
 #include <glm/fwd.hpp>
 #include <glm/glm.hpp>
+#include <memory>
 #include <vulkan/vulkan_enums.hpp>
 #include <vulkan/vulkan_handles.hpp>
 #include <vulkan/vulkan_structs.hpp>
 
+#include "etna/BlockingTransferHelper.hpp"
 #include "etna/GpuSharedResource.hpp"
+#include "etna/OneShotCmdMgr.hpp"
 #include "scene/SceneManager.hpp"
 #include "stages/AABBCalculator.hpp"
 #include "stages/CullingManager.hpp"
@@ -81,12 +84,11 @@ private:
   void recreateAABBBuffer(uint32_t count);
   void recreateInstancesToCommandsMapBuffer(uint32_t count);
 
-  template <typename Element>
-  void uploadBuffer(const std::vector<Element>& source, SynchronizedBuffer& destination, vk::CommandBuffer cmd_buf);
-
   void recalculateAABBs(vk::CommandBuffer cmd_buf);
 
 private:
+  std::unique_ptr<etna::OneShotCmdMgr> oneShotCommands;
+  etna::BlockingTransferHelper transferHelper;
   std::unique_ptr<SceneManager> sceneMgr;
 
   etna::GpuSharedResource<SynchronizedBuffer> drawParams;

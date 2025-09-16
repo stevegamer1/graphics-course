@@ -1,4 +1,5 @@
 #include "WorldRenderer.hpp"
+#include "etna/BlockingTransferHelper.hpp"
 #include "etna/Buffer.hpp"
 #include "etna/Image.hpp"
 #include "stages/CullingManager.hpp"
@@ -23,7 +24,9 @@
 
 
 WorldRenderer::WorldRenderer(const etna::GpuWorkCount& work_count)
-  : sceneMgr{std::make_unique<SceneManager>()}
+  : oneShotCommands{etna::get_context().createOneShotCmdMgr()}
+  , transferHelper(etna::BlockingTransferHelper::CreateInfo{ .stagingSize = 1024 })
+  , sceneMgr{std::make_unique<SceneManager>()}
   , drawParams(work_count, std::in_place_t{})
   , drawParamsCulledIndicesBuffer(work_count, std::in_place_t{})
   , instanceMeshToIndirectCommandMap(work_count, std::in_place_t{})
@@ -79,15 +82,15 @@ void WorldRenderer::recreateDrawParamsBuffers(uint32_t count) {
 
   drawParams.get().buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
     .size = sizeof(SingleRelemDrawParams) * count,
-    .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eStorageBuffer,
-    .memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+    .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+    .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "drawParams",
   });
   drawParams.get().current_size = drawParamsSize;
 
   drawParamsCulledIndicesBuffer.get().buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
     .size = culledIndicesSize,
-    .bufferUsage = vk::BufferUsageFlagBits::eStorageBuffer,
+    .bufferUsage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
     .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "drawParamsCulledIndicesBuffer",
   });
@@ -98,8 +101,8 @@ void WorldRenderer::recreateIndirectCommandsBuffer(uint32_t count) {
   size_t size = sizeof(vk::DrawIndexedIndirectCommand) * count;
   indirectCommandsBuffer.get().buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
     .size = size,
-    .bufferUsage = vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer,
-    .memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+    .bufferUsage = vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+    .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "indirectCommands",
   });
   indirectCommandsBuffer.get().current_size = size;
@@ -109,8 +112,8 @@ void WorldRenderer::createIndirectCommandCountBuffer() {
   size_t size = sizeof(uint32_t);
   indirectCommandsCountBuffer.get().buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
     .size = size,
-    .bufferUsage = vk::BufferUsageFlagBits::eIndirectBuffer,
-    .memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+    .bufferUsage = vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eTransferDst,
+    .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "indirectCommandCountBuffer"
   });
   indirectCommandsCountBuffer.get().current_size = size;
@@ -121,7 +124,7 @@ void WorldRenderer::recreateAABBBuffer(uint32_t count) {
   aabbBuffer.get().buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
     .size = size,
     .bufferUsage = vk::BufferUsageFlagBits::eStorageBuffer,
-    .memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+    .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "AABBBuffer"
   });
   aabbBuffer.get().current_size = size;
@@ -131,23 +134,11 @@ void WorldRenderer::recreateInstancesToCommandsMapBuffer(uint32_t count) {
   size_t size = sizeof(uint32_t) * count;
   instanceMeshToIndirectCommandMap.get().buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
     .size = size,
-    .bufferUsage = vk::BufferUsageFlagBits::eStorageBuffer,
-    .memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+    .bufferUsage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+    .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "instanceMeshToIndirectCommandMap"
   });
   instanceMeshToIndirectCommandMap.get().current_size = size;
-}
-
-template <typename Element>
-void WorldRenderer::uploadBuffer(const std::vector<Element>& source, SynchronizedBuffer& destination, vk::CommandBuffer cmd_buf) {
-  destination.syncBeforeUsage(BufferSyncUsage{
-    .stageFlags = vk::PipelineStageFlagBits2::eHost,
-    .accessFlags = vk::AccessFlagBits2::eHostWrite
-  }, cmd_buf);
-
-  destination.buffer.map();
-  memcpy(destination.buffer.data(), source.data(), source.size() * sizeof(Element));
-  destination.buffer.unmap();
 }
 
 void WorldRenderer::recalculateAABBs(vk::CommandBuffer cmd_buf) {
@@ -268,14 +259,27 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary(vk::CommandBuffer cmd_bu
     BuffersForDrawIndexedIndirectCount cpuBuffersForIndirectDraw = prepareDrawParamsBuffersOnCPU();
     BuffersForCulling cullingBuffers = prepareCullingBuffersOnCPU(cpuBuffersForIndirectDraw.commands);
 
-    uploadBuffer(cpuBuffersForIndirectDraw.draw_params, drawParams.get(), cmd_buf);
+    // Need SynchronizedBuffer::syncForUsage here?
+    transferHelper.uploadBuffer(
+      *oneShotCommands, 
+      drawParams.get().buffer, 0, 
+      std::span<const SingleRelemDrawParams>(cpuBuffersForIndirectDraw.draw_params));
+    
+    transferHelper.uploadBuffer(
+      *oneShotCommands, 
+      instanceMeshToIndirectCommandMap.get().buffer, 0, 
+      std::span<const uint32_t>(cullingBuffers.instanceToIndirectCommandMap));
 
-    uploadBuffer(cullingBuffers.instanceToIndirectCommandMap, instanceMeshToIndirectCommandMap.get(), cmd_buf);
-
-    uploadBuffer(cpuBuffersForIndirectDraw.commands, indirectCommandsBuffer.get(), cmd_buf);
-
+    transferHelper.uploadBuffer(
+      *oneShotCommands, 
+      indirectCommandsBuffer.get().buffer, 0, 
+      std::span<const vk::DrawIndexedIndirectCommand>(cpuBuffersForIndirectDraw.commands));
+    
     std::vector<uint32_t> countVector{uint32_t(cpuBuffersForIndirectDraw.commands.size())};
-    uploadBuffer(countVector, indirectCommandsCountBuffer.get(), cmd_buf);
+    transferHelper.uploadBuffer(
+      *oneShotCommands, 
+      indirectCommandsCountBuffer.get().buffer, 0, 
+      std::span<const uint32_t>(countVector));
 
     sceneDirty = false;
   }
