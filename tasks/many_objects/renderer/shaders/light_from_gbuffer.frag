@@ -37,12 +37,31 @@ layout(binding = 1) uniform sampler2D gBufferAlbedo;
 layout(binding = 2) uniform sampler2D gBufferNormal;
 layout(binding = 3) uniform sampler2D gBufferDepth;
 
+const uint FLAG_ZSIGN = (uint(1) << 0);
+
+uint getFlags(float albedoAlpha) {
+  return uint(albedoAlpha * 255.0f + 0.5f);
+}
+
+float getZSign(uint flags) {
+  return ((flags & FLAG_ZSIGN) != 0) ? 1.0f : -1.0f;
+}
+
+vec3 getNormal(vec2 wNormalXY, float zSign) {
+  vec3 result = vec3(0.0f);
+  result.xy = wNormalXY;
+  float zSqr = 1.0f - result.x * result.x - result.y * result.y;
+  result.z = sqrt(max(zSqr, 0.0f)) * zSign;
+  return normalize(result);
+}
+
 void main()
 {
   vec2 uv = gl_FragCoord.xy / params.resolution;
 
+  const uint flags = getFlags(texture(gBufferAlbedo, uv).a);
   const vec3 albedo = texture(gBufferAlbedo, uv).rgb;
-  const vec3 wNormal = texture(gBufferNormal, uv).rgb;
+  const vec3 wNormal = getNormal(texture(gBufferNormal, uv).xy, getZSign(flags));
   const float depth = texture(gBufferDepth, uv).r;
 
   mat4 mInvProjView = inverse(params.mProjView);
@@ -52,8 +71,6 @@ void main()
   lookVectorEnd /= lookVectorEnd.w;
   vec3 lookVector = lookVectorEnd.xyz - lookVectorStart.xyz;
   vec3 wCamPos = params.wCamPos.xyz;
-
-  
 
   const vec3 lightColor = lights.values[vOut.instanceIndex].color;
   const uint lightType = lights.values[vOut.instanceIndex].type;

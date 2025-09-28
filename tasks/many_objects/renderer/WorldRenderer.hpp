@@ -109,7 +109,7 @@ private:
   const vk::Format ALBEDO_FORMAT = vk::Format::eR8G8B8A8Srgb;
   etna::GpuSharedResource<etna::Image> normalsImage;
   etna::GpuSharedResource<glm::uvec2> normalsImageResolution;
-  const vk::Format NORMAL_FORMAT = vk::Format::eR8G8B8A8Snorm;
+  const vk::Format NORMAL_FORMAT = vk::Format::eR8G8Snorm;
   etna::GpuSharedResource<etna::Image> depthImage;
   etna::GpuSharedResource<glm::uvec2> depthImageResolution;
   const vk::Format DEPTH_FORMAT = vk::Format::eD32Sfloat;
@@ -119,7 +119,6 @@ private:
   glm::mat4x4 lightMatrix;
 
   CullingManager culler;
-  // IndirectDrawManager drawer;
   GBufferDrawer gbufferDrawer;
   GBufferLightResolver lightGBufferResolver;
   AABBCalculator aabbCalculator;

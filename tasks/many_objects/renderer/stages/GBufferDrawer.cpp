@@ -48,8 +48,7 @@ void GBufferDrawer::createPipeline(
           },
           vk::PipelineColorBlendAttachmentState{
             .blendEnable = vk::False,
-            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
-              vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+            .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG,
           }
         },
         .logicOp = {}

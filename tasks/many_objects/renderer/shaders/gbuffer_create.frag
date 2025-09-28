@@ -4,7 +4,7 @@
 
 
 layout(location = 0) out vec4 out_albedo;
-layout(location = 1) out vec4 out_normal;
+layout(location = 1) out vec2 out_normal;
 
 layout(location = 0) in VS_OUT
 {
@@ -14,20 +14,21 @@ layout(location = 0) in VS_OUT
   vec2 texCoord;
 } surf;
 
+const uint FLAG_ZSIGN = (uint(1) << 0);
+
+float flagsToAlbedoAlpha(uint flags) {
+  return float(flags) / 255.0f;
+}
+
 void main()
 {
-  // const vec3 wLightPos = vec3(10, 10, 10);
   const vec3 surfaceColor = vec3(1.0f, 1.0f, 1.0f);
   const vec3 wNormal = normalize(surf.wNorm);
+  uint flags = 0;
+  flags |= wNormal.z > 0.0f ? FLAG_ZSIGN : 0;
 
-  // const vec3 lightColor = vec3(1.0f, 1.0f, 1.0f);
-
-  // const vec3 lightDir   = normalize(wLightPos - surf.wPos);
-  // const vec3 diffuse = max(dot(wNormal, lightDir), 0.0f) * lightColor;
-  // const float ambient = 0.05;
-  // out_albedo.rgb = (diffuse + ambient) * surfaceColor;
   out_albedo.rgb = surfaceColor;
-  out_albedo.a = 1.0f;
+  out_albedo.a = flagsToAlbedoAlpha(flags);
 
-  out_normal.rgb = wNormal;
+  out_normal.rg = wNormal.xy;
 }
