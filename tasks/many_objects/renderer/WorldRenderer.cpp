@@ -3,6 +3,7 @@
 #include "etna/Buffer.hpp"
 #include "etna/Image.hpp"
 #include "stages/CullingManager.hpp"
+#include "stages/GBufferLightResolver.hpp"
 #include "stages/SynchronizedBuffer.hpp"
 
 #include <cstdint>
@@ -27,20 +28,26 @@ WorldRenderer::WorldRenderer(const etna::GpuWorkCount& work_count)
   : oneShotCommands{etna::get_context().createOneShotCmdMgr()}
   , transferHelper(etna::BlockingTransferHelper::CreateInfo{ .stagingSize = 1024 })
   , sceneMgr{std::make_unique<SceneManager>()}
+  , lights(work_count, std::in_place_t{})
   , drawParams(work_count, std::in_place_t{})
   , drawParamsCulledIndicesBuffer(work_count, std::in_place_t{})
   , instanceMeshToIndirectCommandMap(work_count, std::in_place_t{})
   , aabbBuffer(work_count, std::in_place_t{})
   , indirectCommandsBuffer(work_count, std::in_place_t{})
   , indirectCommandsCountBuffer(work_count, std::in_place_t{})
+  , albedoImage(work_count, std::in_place_t{})
+  , albedoImageResolution(work_count, std::in_place_t{})
+  , normalsImage(work_count, std::in_place_t{})
+  , normalsImageResolution(work_count, std::in_place_t{})
+  , depthImage(work_count, std::in_place_t{})
+  , depthImageResolution(work_count, std::in_place_t{})
 {
 }
 
 void WorldRenderer::allocateResources(glm::uvec2 swapchain_resolution)
 {
   resolution = swapchain_resolution;
-
-  drawer.createDepthImage(resolution);
+  lightGBufferResolver.allocateAndFillResources();
 }
 
 void WorldRenderer::loadScene(std::filesystem::path path)
@@ -52,14 +59,19 @@ void WorldRenderer::loadShaders()
 {
   aabbCalculator.loadShader();
   culler.loadShader();
-  drawer.loadShader();
+  gbufferDrawer.loadShader();
+  lightGBufferResolver.loadShader();
 }
 
 void WorldRenderer::setupPipelines(vk::Format swapchain_format)
 {
   aabbCalculator.createPipeline();
   culler.createPipeline();
-  drawer.createPipeline(swapchain_format, sceneMgr->getVertexFormatDescription());
+  gbufferDrawer.createPipeline(
+    ALBEDO_FORMAT, NORMAL_FORMAT, DEPTH_FORMAT,
+    sceneMgr->getVertexFormatDescription());
+  lightGBufferResolver.createPipeline(
+    swapchain_format);
 }
 
 void WorldRenderer::debugInput(const Keyboard&) {}
@@ -81,7 +93,7 @@ void WorldRenderer::recreateDrawParamsBuffers(uint32_t count) {
   size_t culledIndicesSize = sizeof(uint32_t) * count;
 
   drawParams.get().buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
-    .size = sizeof(SingleRelemDrawParams) * count,
+    .size = drawParamsSize,
     .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
     .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "drawParams",
@@ -139,6 +151,17 @@ void WorldRenderer::recreateInstancesToCommandsMapBuffer(uint32_t count) {
     .name = "instanceMeshToIndirectCommandMap"
   });
   instanceMeshToIndirectCommandMap.get().current_size = size;
+}
+
+void WorldRenderer::recreateLights(uint32_t count) {
+  size_t size = sizeof(GBufferLightResolver::Light) * count;
+  lights.get().buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
+    .size = size,
+    .bufferUsage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+    .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
+    .name = "lights",
+  });
+  lights.get().current_size = size;
 }
 
 void WorldRenderer::recalculateAABBs(vk::CommandBuffer cmd_buf) {
@@ -255,6 +278,45 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary(vk::CommandBuffer cmd_bu
     } 
   }
 
+  {
+    uint32_t desiredLightsCount = uint32_t(lightsVector.size());
+    uint32_t currentCount = uint32_t(lights.get().current_size / sizeof(GBufferLightResolver::Light));
+    if (currentCount < desiredLightsCount) {
+      recreateLights(desiredLightsCount);
+      markSceneDirty();
+    } 
+  }
+
+  if (albedoImageResolution.get() != resolution) {
+    albedoImage.get() = etna::get_context().createImage({
+      .extent = vk::Extent3D{resolution.x, resolution.y, 1},
+      .name = "G-Buffer albedo image",
+      .format = ALBEDO_FORMAT,
+      .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled
+    });
+    albedoImageResolution.get() = resolution;
+  }
+
+  if (normalsImageResolution.get() != resolution) {
+    normalsImage.get() = etna::get_context().createImage({
+      .extent = vk::Extent3D{resolution.x, resolution.y, 1},
+      .name = "G-Buffer normals image",
+      .format = NORMAL_FORMAT,
+      .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled
+    });
+    normalsImageResolution.get() = resolution;
+  }
+
+  if (depthImageResolution.get() != resolution) {
+    depthImage.get() = etna::get_context().createImage({
+      .extent = vk::Extent3D{resolution.x, resolution.y, 1},
+      .name = "G-Buffer depth image",
+      .format = DEPTH_FORMAT,
+      .imageUsage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled
+    });
+    depthImageResolution.get() = resolution;
+  }
+
   if (sceneDirty) {
     BuffersForDrawIndexedIndirectCount cpuBuffersForIndirectDraw = prepareDrawParamsBuffersOnCPU();
     BuffersForCulling cullingBuffers = prepareCullingBuffersOnCPU(cpuBuffersForIndirectDraw.commands);
@@ -280,6 +342,12 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary(vk::CommandBuffer cmd_bu
       *oneShotCommands, 
       indirectCommandsCountBuffer.get().buffer, 0, 
       std::span<const uint32_t>(countVector));
+    
+    using Light = GBufferLightResolver::Light;
+    transferHelper.uploadBuffer(
+      *oneShotCommands, 
+      lights.get().buffer, 0, 
+      std::span<const Light>(lightsVector));
 
     sceneDirty = false;
   }
@@ -321,24 +389,48 @@ void WorldRenderer::cullMeshes(vk::CommandBuffer cmd_buf, const Camera& camera) 
     uint32_t(sceneMgr->getInstanceMeshes().size()), frustum);
 }
 
-void WorldRenderer::renderScene(
-  vk::CommandBuffer cmd_buf, const glm::mat4x4& glob_tm, vk::Image target_image, vk::ImageView target_image_view)
+void WorldRenderer::generateGBuffer(
+  vk::CommandBuffer cmd_buf, const glm::mat4x4& glob_tm)
 {
   if (!sceneMgr->getVertexBuffer())
     return;
 
-  drawer.run(cmd_buf,
+  gbufferDrawer.run(cmd_buf,
     drawParams.get(),
     indirectCommandsBuffer.get(),
     drawParamsCulledIndicesBuffer.get(),
     indirectCommandsCountBuffer.get(),
-    target_image,
-    target_image_view,
+    albedoImage.get().get(),
+    albedoImage.get().getView({}),
+    normalsImage.get().get(),
+    normalsImage.get().getView({}),
+    depthImage.get().get(),
+    depthImage.get().getView({}),
     sceneMgr->getVertexBuffer(),
     sceneMgr->getIndexBuffer(),
     resolution,
     uint32_t(sceneMgr->getRenderElements().size()),
     glob_tm);
+}
+
+void WorldRenderer::resolveGBufferWithLights(
+  vk::CommandBuffer cmd_buf, const glm::mat4x4& glob_tm, vk::Image target_image, vk::ImageView target_image_view)
+{
+  if (!sceneMgr->getVertexBuffer())
+    return;
+
+  lightGBufferResolver.run(cmd_buf,
+    lights.get(),
+    uint32_t(lightsVector.size()),
+    albedoImage.get(),
+    normalsImage.get(),
+    depthImage.get(),
+    target_image,
+    target_image_view,
+
+    resolution,
+    glob_tm,
+    cameraCopy.position);
 }
 
 void WorldRenderer::renderWorld(
@@ -354,7 +446,9 @@ void WorldRenderer::renderWorld(
 
     cullMeshes(cmd_buf, cameraCopy);
 
-    renderScene(cmd_buf, worldViewProj, target_image, target_image_view);
+    generateGBuffer(cmd_buf, worldViewProj);
+
+    resolveGBufferWithLights(cmd_buf, worldViewProj, target_image, target_image_view);
 
     drawParams.get().resetAccumulatedUsage();
     drawParamsCulledIndicesBuffer.get().resetAccumulatedUsage();
