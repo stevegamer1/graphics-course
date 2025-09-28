@@ -62,8 +62,7 @@ void AABBCalculator::run(vk::CommandBuffer cmd_buf,
     );
 
     PushConstants pushConsts{
-        .abbs_count = relem_count,
-        .vertex_size_in_bytes = sizeof(SceneManager::Vertex)
+        .abbs_count = relem_count
     };
     cmd_buf.pushConstants<PushConstants>(
         pipeline.getVkPipelineLayout(),

@@ -13,8 +13,12 @@
 #include <etna/RenderTargetStates.hpp>
 #include <etna/Profiling.hpp>
 #include <glm/ext.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/ext/quaternion_geometric.hpp>
+#include <glm/common.hpp>
+#include <glm/ext/quaternion_trigonometric.hpp>
 #include <glm/fwd.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <glm/matrix.hpp>
 #include <utility>
 #include <vector>
@@ -362,7 +366,7 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary(vk::CommandBuffer cmd_bu
 glm::vec4 transform_plane(glm::vec4 plane, glm::mat4 matrix) {
   glm::vec4 resultXYZ4 = glm::normalize(matrix * glm::vec4(plane.x, plane.y, plane.z, 0.0f));
 
-  glm::vec4 pointOnPlane(plane.x * plane.w, plane.y * plane.w, plane.z * plane.w, 1.0f);
+  glm::vec4 pointOnPlane(glm::vec3(plane) * plane.w, 1.0f);
   float resultW = glm::dot(matrix * pointOnPlane, resultXYZ4);
 
   return glm::vec4(resultXYZ4.x, resultXYZ4.y, resultXYZ4.z, resultW);

@@ -34,8 +34,8 @@ public:
     glm::vec4 bottom;
   };
 
-  // fov is in degrees, aspect is width/height.
-  static Frustum getFrustum(float fov, float near, float far, float aspect);
+  // vfov is vertical in degrees, aspect is width/height.
+  static Frustum getFrustum(float vfov, float near, float far, float aspect);
 
   // Synchronizes buffers by itself.
   void run(

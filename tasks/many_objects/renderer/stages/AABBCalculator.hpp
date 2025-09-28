@@ -39,7 +39,6 @@ private:
   struct PushConstants
   {
     uint32_t abbs_count;
-    uint32_t vertex_size_in_bytes;
   };
 
   etna::ComputePipeline pipeline;

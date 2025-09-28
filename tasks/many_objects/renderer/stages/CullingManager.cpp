@@ -23,18 +23,18 @@ void CullingManager::createPipeline() {
     pipeline = pipelineManager.createComputePipeline(PROGRAM_NAME, {});
 }
 
-CullingManager::Frustum CullingManager::getFrustum(float fov, float near, float far, float aspect) {
-    fov = fov / 180.0f * glm::pi<float>();
+CullingManager::Frustum CullingManager::getFrustum(float vfov, float near, float far, float aspect) {
+    vfov = vfov / 180.0f * glm::pi<float>();
 
     Frustum result;
-    float vfov = atan(tan(fov) / aspect);  // vertical fov
+    float fov = 2.0f * atan(tan(vfov / 2.0f) * aspect);  // horizontal fov
 
     result.near = glm::vec4(0, 0, 1, near);
     result.far = glm::vec4(0, 0, -1, -far);
-    result.left = glm::vec4(-cos(fov), 0, sin(fov), 0);
-    result.right = glm::vec4(cos(fov), 0, sin(fov), 0);
-    result.top = glm::vec4(0, -cos(vfov), sin(vfov), 0);
-    result.bottom = glm::vec4(0, cos(vfov), sin(vfov), 0);
+    result.left = glm::vec4(-cos(fov / 2.0f), 0, sin(fov / 2.0f), 0);
+    result.right = glm::vec4(cos(fov / 2.0f), 0, sin(fov / 2.0f), 0);
+    result.top = glm::vec4(0, -cos(vfov / 2.0f), sin(vfov / 2.0f), 0);
+    result.bottom = glm::vec4(0, cos(vfov / 2.0f), sin(vfov / 2.0f), 0);
 
     return result;
 }

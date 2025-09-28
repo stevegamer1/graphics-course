@@ -58,7 +58,7 @@ bool isInFront(vec3 point, vec4 plane) {
 
 bool IntersectsFrustum(AABB aabb) {
   uint gID = gl_GlobalInvocationID.x;
-  for (int plane_i = 0; plane_i < 1; ++plane_i) {
+  for (int plane_i = 0; plane_i < 6; ++plane_i) {
     bool have_in_front = false;
 
     for (int x = 0; x < 2; ++x) {

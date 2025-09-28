@@ -8,7 +8,6 @@ layout(local_size_x = 16) in;
 
 layout(push_constant) uniform params_t {
   uint aabbs_count;
-  uint vertex_size_in_bytes;
 } params;
 
 struct AABB
@@ -37,10 +36,8 @@ layout(binding = 1) readonly buffer Commands {
 
 
 struct Vertex {
-  vec3 wPos;
-  vec3 wNorm;
-  vec3 wTangent;
-  vec2 texCoord;
+  vec4 wPosAndwNorm;
+  vec4 wTangentAndTexCoord;
 };
 
 layout(binding = 2) readonly buffer Vertices
@@ -71,8 +68,8 @@ void main(void)
 
   for (int i = 0; i < command.indexCount; ++i) {
     uint index = indices.indices[command.firstIndex + i];
-    uint vertex_offset = command.vertexOffset / params.vertex_size_in_bytes;
-    vec3 vertex = vertices.vertices[vertex_offset + index].wPos;
+    uint vertex_offset = command.vertexOffset;
+    vec3 vertex = vertices.vertices[vertex_offset + index].wPosAndwNorm.xyz;
     result.min.xyz = min(vertex, result.min.xyz);
     result.max.xyz = max(vertex, result.max.xyz);
   }

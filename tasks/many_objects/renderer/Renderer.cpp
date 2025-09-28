@@ -47,7 +47,8 @@ void Renderer::initVulkan(std::span<const char*> instance_extensions)
     .features = vk::PhysicalDeviceFeatures2{
       .pNext = &features12,
       .features = {
-        .multiDrawIndirect = vk::True,
+        .independentBlend = vk::True,
+        .multiDrawIndirect = vk::True
       }
     },
     .physicalDeviceIndexOverride = {},
