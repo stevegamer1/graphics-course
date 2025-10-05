@@ -1,5 +1,5 @@
 #pragma once
-#include "SynchronizedBuffer.hpp"
+#include "BufferWithSize.hpp"
 #include "etna/BlockingTransferHelper.hpp"
 #include "etna/GraphicsPipeline.hpp"
 #include <cstdint>
@@ -47,7 +47,7 @@ public:
   void run(
     vk::CommandBuffer cmd_buf,
 
-    SynchronizedBuffer& lights,
+    etna::Buffer& lights,
     uint32_t lights_count,
 
     etna::Image& albedo_image,
@@ -81,8 +81,8 @@ private:
   std::vector<Vertex> sphereVertices;
   std::vector<uint32_t> sphereIndices;
 
-  SynchronizedBuffer sphereVertexBuffer;
-  SynchronizedBuffer sphereIndexBuffer;
+  BufferWithSize sphereVertexBuffer;
+  BufferWithSize sphereIndexBuffer;
 
   etna::GraphicsPipeline pipeline;
   const char* PROGRAM_NAME = "resolve_gbuffer_with_light_program";

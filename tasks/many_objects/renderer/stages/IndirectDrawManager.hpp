@@ -1,5 +1,5 @@
 #pragma once
-#include "SynchronizedBuffer.hpp"
+#include "etna/Buffer.hpp"
 #include "etna/GraphicsPipeline.hpp"
 #include "etna/Image.hpp"
 #include <etna/Vulkan.hpp>
@@ -31,10 +31,10 @@ public:
   void run(
     vk::CommandBuffer cmd_buf,
 
-    SynchronizedBuffer& draw_params,
-    SynchronizedBuffer& indirect_commands,
-    SynchronizedBuffer& draw_params_indices,
-    SynchronizedBuffer& commands_count,
+    etna::Buffer& draw_params,
+    etna::Buffer& indirect_commands,
+    etna::Buffer& draw_params_indices,
+    etna::Buffer& commands_count,
 
     vk::Image target_image,
     vk::ImageView target_image_view,

@@ -1,10 +1,9 @@
 #include "AABBCalculator.hpp"
-#include "SynchronizedBuffer.hpp"
 #include <vulkan/vulkan_enums.hpp>
+#include "etna/Buffer.hpp"
 #include "etna/DescriptorSet.hpp"
 #include "etna/Etna.hpp"
 #include "etna/PipelineManager.hpp"
-#include "scene/SceneManager.hpp"
 
 
 void AABBCalculator::loadShader() {
@@ -21,22 +20,20 @@ void AABBCalculator::createPipeline() {
 
 void AABBCalculator::run(vk::CommandBuffer cmd_buf,
 
-    SynchronizedBuffer& aabbs,
-    SynchronizedBuffer& indirect_commands,
+    etna::Buffer& aabbs,
+    etna::Buffer& indirect_commands,
 
     etna::Buffer& vertex_buffer,
     etna::Buffer& index_buffer,
 
     uint32_t relem_count) {
-    aabbs.syncBeforeUsage(BufferSyncUsage{
-        .stageFlags = vk::PipelineStageFlagBits2::eComputeShader,
-        .accessFlags = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite
-    }, cmd_buf);
+    etna::set_state(cmd_buf, aabbs.get(),
+        vk::PipelineStageFlagBits2::eComputeShader,
+        vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite);
 
-    indirect_commands.syncBeforeUsage(BufferSyncUsage{
-        .stageFlags = vk::PipelineStageFlagBits2::eComputeShader,
-        .accessFlags = vk::AccessFlagBits2::eShaderRead
-    }, cmd_buf);
+    etna::set_state(cmd_buf, indirect_commands.get(),
+        vk::PipelineStageFlagBits2::eComputeShader,
+        vk::AccessFlagBits2::eShaderRead);
 
     cmd_buf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.getVkPipeline());
 
@@ -46,8 +43,8 @@ void AABBCalculator::run(vk::CommandBuffer cmd_buf,
         programInfo.getDescriptorLayoutId(0),
         cmd_buf,
         {
-            etna::Binding{0, aabbs.buffer.genBinding()},
-            etna::Binding{1, indirect_commands.buffer.genBinding()},
+            etna::Binding{0, aabbs.genBinding()},
+            etna::Binding{1, indirect_commands.genBinding()},
             etna::Binding{2, vertex_buffer.genBinding()},
             etna::Binding{3, index_buffer.genBinding()}
         }

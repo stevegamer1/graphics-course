@@ -1,8 +1,6 @@
 #pragma once
-#include "SynchronizedBuffer.hpp"
-#include "etna/BlockingTransferHelper.hpp"
+#include "etna/Buffer.hpp"
 #include "etna/ComputePipeline.hpp"
-#include "etna/OneShotCmdMgr.hpp"
 #include <etna/Vulkan.hpp>
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_enums.hpp>
@@ -41,11 +39,11 @@ public:
   void run(
     vk::CommandBuffer cmd_buf,
 
-    SynchronizedBuffer& draw_params,
-    SynchronizedBuffer& aabbs,
-    SynchronizedBuffer& indirect_commands,
-    SynchronizedBuffer& draw_params_indices,
-    SynchronizedBuffer& command_indices,
+    etna::Buffer& draw_params,
+    etna::Buffer& aabbs,
+    etna::Buffer& indirect_commands,
+    etna::Buffer& draw_params_indices,
+    etna::Buffer& command_indices,
 
     uint32_t instance_count,
     const Frustum& camera_frustum);

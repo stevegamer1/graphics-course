@@ -1,5 +1,5 @@
 #pragma once
-#include "SynchronizedBuffer.hpp"
+#include "etna/Buffer.hpp"
 #include "etna/ComputePipeline.hpp"
 #include <etna/Vulkan.hpp>
 #include <vulkan/vulkan_core.h>
@@ -27,8 +27,8 @@ public:
   void run(
     vk::CommandBuffer cmd_buf,
 
-    SynchronizedBuffer& aabbs,
-    SynchronizedBuffer& indirect_commands,
+    etna::Buffer& aabbs,
+    etna::Buffer& indirect_commands,
 
     etna::Buffer& vertex_buffer,
     etna::Buffer& index_buffer,

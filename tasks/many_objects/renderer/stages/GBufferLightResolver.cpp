@@ -1,8 +1,8 @@
 #include "GBufferLightResolver.hpp"
-#include "SynchronizedBuffer.hpp"
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/fwd.hpp>
 #include <vulkan/vulkan_enums.hpp>
+#include "etna/Buffer.hpp"
 #include "etna/DescriptorSet.hpp"
 #include "etna/Etna.hpp"
 #include "etna/GlobalContext.hpp"
@@ -73,7 +73,7 @@ void GBufferLightResolver::allocateAndFillResources() {
     .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "light sphere vertices buffer",
   });
-  sphereVertexBuffer.current_size = vertexBufferSize;
+  sphereVertexBuffer.size = vertexBufferSize;
 
   size_t indexBufferSize = sizeof(uint32_t) * sphereIndices.size();
   sphereIndexBuffer.buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
@@ -82,7 +82,7 @@ void GBufferLightResolver::allocateAndFillResources() {
     .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "light sphere indices buffer",
   });
-  sphereIndexBuffer.current_size = indexBufferSize;
+  sphereIndexBuffer.size = indexBufferSize;
 
   transferHelper.uploadBuffer(*oneShotCommands, sphereVertexBuffer.buffer, 0, std::span<const Vertex>(sphereVertices));
   transferHelper.uploadBuffer(*oneShotCommands, sphereIndexBuffer.buffer, 0, std::span<const uint32_t>(sphereIndices));
@@ -145,20 +145,10 @@ void GBufferLightResolver::createPipeline(
     });
 }
 
-// void GBufferLightResolver::createDepthImage(glm::uvec2 resolution)
-// {
-//   mainViewDepth = etna::get_context().createImage(etna::Image::CreateInfo{
-//     .extent = vk::Extent3D{resolution.x, resolution.y, 1},
-//     .name = "main_view_depth",
-//     .format = DEPTH_ATTACHMENT_FORMAT,
-//     .imageUsage = vk::ImageUsageFlagBits::eDepthStencilAttachment,
-//   });
-// }
-
 void GBufferLightResolver::run(
   vk::CommandBuffer cmd_buf,
 
-    SynchronizedBuffer& lights,
+    etna::Buffer& lights,
     uint32_t lights_count,
 
     etna::Image& albedo_image,
@@ -171,17 +161,15 @@ void GBufferLightResolver::run(
     glm::mat4 proj_view,
     glm::vec3 cam_pos)
 {
-  BufferSyncUsage graphicsUsage{
-    .stageFlags =
+  vk::PipelineStageFlags2 graphicsPipelineStage =
       vk::PipelineStageFlagBits2::eVertexShader |
       vk::PipelineStageFlagBits2::eFragmentShader |
-      vk::PipelineStageFlagBits2::eDrawIndirect,
-    .accessFlags =
+      vk::PipelineStageFlagBits2::eDrawIndirect;
+  vk::AccessFlags2 graphicsAccess =
       vk::AccessFlagBits2::eUniformRead |
       vk::AccessFlagBits2::eShaderStorageRead |
-      vk::AccessFlagBits2::eIndirectCommandRead,
-  };
-  lights.syncBeforeUsage(graphicsUsage, cmd_buf);
+      vk::AccessFlagBits2::eIndirectCommandRead;
+  etna::set_state(cmd_buf, lights.get(), graphicsPipelineStage, graphicsAccess);
 
   etna::set_state(
     cmd_buf,
@@ -233,7 +221,7 @@ void GBufferLightResolver::run(
         programInfo.getDescriptorLayoutId(0),
         cmd_buf,
         {
-          etna::Binding{0, lights.buffer.genBinding()},
+          etna::Binding{0, lights.genBinding()},
           etna::Binding{1, albedo_image.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
           etna::Binding{2, normals_image.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
           etna::Binding{3, depth_image.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},

@@ -1,13 +1,10 @@
 #include "CullingManager.hpp"
-#include "SynchronizedBuffer.hpp"
 #include <cmath>
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/fwd.hpp>
 #include <vulkan/vulkan_enums.hpp>
-#include "etna/BlockingTransferHelper.hpp"
 #include "etna/Etna.hpp"
 #include "etna/GlobalContext.hpp"
-#include "etna/OneShotCmdMgr.hpp"
 #include "etna/PipelineManager.hpp"
 
 
@@ -39,34 +36,36 @@ CullingManager::Frustum CullingManager::getFrustum(float vfov, float near, float
     return result;
 }
 
-void CullingManager::run(vk::CommandBuffer cmd_buf, SynchronizedBuffer& draw_params, SynchronizedBuffer& aabbs,
-             SynchronizedBuffer& indirect_commands, SynchronizedBuffer& draw_params_indices,
-             SynchronizedBuffer& command_indices, uint32_t instance_count, const Frustum& camera_frustum) {    
-    draw_params.syncBeforeUsage(BufferSyncUsage{
-        .stageFlags = vk::PipelineStageFlagBits2::eComputeShader,
-        .accessFlags = vk::AccessFlagBits2::eShaderRead
-    }, cmd_buf);
+void CullingManager::run(
+    vk::CommandBuffer cmd_buf,
 
-    aabbs.syncBeforeUsage(BufferSyncUsage{
-        .stageFlags = vk::PipelineStageFlagBits2::eComputeShader,
-        .accessFlags = vk::AccessFlagBits2::eShaderRead
-    }, cmd_buf);
+    etna::Buffer& draw_params,
+    etna::Buffer& aabbs,
+    etna::Buffer& indirect_commands,
+    etna::Buffer& draw_params_indices,
+    etna::Buffer& command_indices,
+    
+    uint32_t instance_count,
+    const Frustum& camera_frustum) {    
+    etna::set_state(cmd_buf, draw_params.get(), 
+        vk::PipelineStageFlagBits2::eComputeShader, 
+        vk::AccessFlagBits2::eShaderRead);
 
-    indirect_commands.syncBeforeUsage(BufferSyncUsage{
-        .stageFlags = vk::PipelineStageFlagBits2::eComputeShader,
-        .accessFlags = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite
-    }, cmd_buf);
+    etna::set_state(cmd_buf, aabbs.get(),
+        vk::PipelineStageFlagBits2::eComputeShader,
+        vk::AccessFlagBits2::eShaderRead);
 
-    draw_params_indices.syncBeforeUsage(BufferSyncUsage{
-        .stageFlags = vk::PipelineStageFlagBits2::eComputeShader,
-        .accessFlags = vk::AccessFlagBits2::eShaderWrite
-    }, cmd_buf);
+    etna::set_state(cmd_buf, indirect_commands.get(),
+        vk::PipelineStageFlagBits2::eComputeShader,
+        vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite);
 
-    command_indices.syncBeforeUsage(BufferSyncUsage{
-        .stageFlags = vk::PipelineStageFlagBits2::eComputeShader,
-        .accessFlags = vk::AccessFlagBits2::eShaderRead
-    }, cmd_buf);
+    etna::set_state(cmd_buf, draw_params_indices.get(),
+        vk::PipelineStageFlagBits2::eComputeShader,
+        vk::AccessFlagBits2::eShaderWrite);
 
+    etna::set_state(cmd_buf, command_indices.get(),
+        vk::PipelineStageFlagBits2::eComputeShader,
+        vk::AccessFlagBits2::eShaderRead);
 
     cmd_buf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.getVkPipeline());
 
@@ -76,11 +75,11 @@ void CullingManager::run(vk::CommandBuffer cmd_buf, SynchronizedBuffer& draw_par
         programInfo.getDescriptorLayoutId(0),
         cmd_buf,
         {
-            etna::Binding{0, draw_params.buffer.genBinding()},
-            etna::Binding{1, aabbs.buffer.genBinding()},
-            etna::Binding{2, indirect_commands.buffer.genBinding()},
-            etna::Binding{3, draw_params_indices.buffer.genBinding()},
-            etna::Binding{4, command_indices.buffer.genBinding()},
+            etna::Binding{0, draw_params.genBinding()},
+            etna::Binding{1, aabbs.genBinding()},
+            etna::Binding{2, indirect_commands.genBinding()},
+            etna::Binding{3, draw_params_indices.genBinding()},
+            etna::Binding{4, command_indices.genBinding()},
         }
     );
 

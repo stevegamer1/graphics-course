@@ -20,7 +20,7 @@
 #include "stages/CullingManager.hpp"
 #include "stages/GBufferDrawer.hpp"
 #include "stages/GBufferLightResolver.hpp"
-#include "stages/SynchronizedBuffer.hpp"
+#include "stages/BufferWithSize.hpp"
 #include "wsi/Keyboard.hpp"
 
 #include "FramePacket.hpp"
@@ -96,13 +96,13 @@ private:
   etna::BlockingTransferHelper transferHelper;
   std::unique_ptr<SceneManager> sceneMgr;
 
-  etna::GpuSharedResource<SynchronizedBuffer> lights;
-  etna::GpuSharedResource<SynchronizedBuffer> drawParams;
-  etna::GpuSharedResource<SynchronizedBuffer> drawParamsCulledIndicesBuffer;
-  etna::GpuSharedResource<SynchronizedBuffer> instanceMeshToIndirectCommandMap;
-  etna::GpuSharedResource<SynchronizedBuffer> aabbBuffer;
-  etna::GpuSharedResource<SynchronizedBuffer> indirectCommandsBuffer;
-  etna::GpuSharedResource<SynchronizedBuffer> indirectCommandsCountBuffer;
+  etna::GpuSharedResource<BufferWithSize> lights;
+  etna::GpuSharedResource<BufferWithSize> drawParams;
+  etna::GpuSharedResource<BufferWithSize> drawParamsCulledIndicesBuffer;
+  etna::GpuSharedResource<BufferWithSize> instanceMeshToIndirectCommandMap;
+  etna::GpuSharedResource<BufferWithSize> aabbBuffer;
+  etna::GpuSharedResource<BufferWithSize> indirectCommandsBuffer;
+  etna::GpuSharedResource<BufferWithSize> indirectCommandsCountBuffer;
 
   etna::GpuSharedResource<etna::Image> albedoImage;
   etna::GpuSharedResource<glm::uvec2> albedoImageResolution;

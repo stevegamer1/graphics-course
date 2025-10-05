@@ -4,7 +4,7 @@
 #include "etna/Image.hpp"
 #include "stages/CullingManager.hpp"
 #include "stages/GBufferLightResolver.hpp"
-#include "stages/SynchronizedBuffer.hpp"
+#include "stages/BufferWithSize.hpp"
 
 #include <cstdint>
 #include <cstring>
@@ -102,7 +102,7 @@ void WorldRenderer::recreateDrawParamsBuffers(uint32_t count) {
     .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "drawParams",
   });
-  drawParams.get().current_size = drawParamsSize;
+  drawParams.get().size = drawParamsSize;
 
   drawParamsCulledIndicesBuffer.get().buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
     .size = culledIndicesSize,
@@ -110,7 +110,7 @@ void WorldRenderer::recreateDrawParamsBuffers(uint32_t count) {
     .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "drawParamsCulledIndicesBuffer",
   });
-  drawParamsCulledIndicesBuffer.get().current_size = culledIndicesSize;
+  drawParamsCulledIndicesBuffer.get().size = culledIndicesSize;
 }
 
 void WorldRenderer::recreateIndirectCommandsBuffer(uint32_t count) {
@@ -121,7 +121,7 @@ void WorldRenderer::recreateIndirectCommandsBuffer(uint32_t count) {
     .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "indirectCommands",
   });
-  indirectCommandsBuffer.get().current_size = size;
+  indirectCommandsBuffer.get().size = size;
 }
 
 void WorldRenderer::createIndirectCommandCountBuffer() {
@@ -132,7 +132,7 @@ void WorldRenderer::createIndirectCommandCountBuffer() {
     .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "indirectCommandCountBuffer"
   });
-  indirectCommandsCountBuffer.get().current_size = size;
+  indirectCommandsCountBuffer.get().size = size;
 }
 
 void WorldRenderer::recreateAABBBuffer(uint32_t count) {
@@ -143,7 +143,7 @@ void WorldRenderer::recreateAABBBuffer(uint32_t count) {
     .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "AABBBuffer"
   });
-  aabbBuffer.get().current_size = size;
+  aabbBuffer.get().size = size;
 }
 
 void WorldRenderer::recreateInstancesToCommandsMapBuffer(uint32_t count) {
@@ -154,7 +154,7 @@ void WorldRenderer::recreateInstancesToCommandsMapBuffer(uint32_t count) {
     .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "instanceMeshToIndirectCommandMap"
   });
-  instanceMeshToIndirectCommandMap.get().current_size = size;
+  instanceMeshToIndirectCommandMap.get().size = size;
 }
 
 void WorldRenderer::recreateLights(uint32_t count) {
@@ -165,13 +165,13 @@ void WorldRenderer::recreateLights(uint32_t count) {
     .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
     .name = "lights",
   });
-  lights.get().current_size = size;
+  lights.get().size = size;
 }
 
 void WorldRenderer::recalculateAABBs(vk::CommandBuffer cmd_buf) {
   aabbCalculator.run(cmd_buf,
-    aabbBuffer.get(),
-    indirectCommandsBuffer.get(),
+    aabbBuffer.get().buffer,
+    indirectCommandsBuffer.get().buffer,
     sceneMgr->getVertexBufferEtna(),
     sceneMgr->getIndexBufferEtna(),
     uint32_t(sceneMgr->getRenderElements().size()));
@@ -241,7 +241,7 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary(vk::CommandBuffer cmd_bu
 
   {
     uint32_t desiredDrawParamsCount = instancesCount;
-    uint32_t currentCount = uint32_t(drawParams.get().current_size / sizeof(SingleRelemDrawParams));
+    uint32_t currentCount = uint32_t(drawParams.get().size / sizeof(SingleRelemDrawParams));
     if (currentCount < desiredDrawParamsCount) {
       recreateDrawParamsBuffers(desiredDrawParamsCount);
       markSceneDirty();
@@ -250,7 +250,7 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary(vk::CommandBuffer cmd_bu
 
   {
     uint32_t desiredInstancesToCommandsMapEntryCount = instancesCount;
-    uint32_t currentCount = uint32_t(instanceMeshToIndirectCommandMap.get().current_size / sizeof(uint32_t));
+    uint32_t currentCount = uint32_t(instanceMeshToIndirectCommandMap.get().size / sizeof(uint32_t));
     if (currentCount < desiredInstancesToCommandsMapEntryCount) {
       recreateInstancesToCommandsMapBuffer(desiredInstancesToCommandsMapEntryCount);
       markSceneDirty();
@@ -259,7 +259,7 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary(vk::CommandBuffer cmd_bu
 
   {
     uint32_t desiredCommandsCount = relemsCount;
-    uint32_t currentCount = uint32_t(indirectCommandsBuffer.get().current_size / sizeof(vk::DrawIndexedIndirectCommand));
+    uint32_t currentCount = uint32_t(indirectCommandsBuffer.get().size / sizeof(vk::DrawIndexedIndirectCommand));
     if (currentCount < desiredCommandsCount) {
       recreateIndirectCommandsBuffer(desiredCommandsCount);
       markSceneDirty();
@@ -267,7 +267,7 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary(vk::CommandBuffer cmd_bu
   }
 
   {
-    if (indirectCommandsCountBuffer.get().current_size == 0) {
+    if (indirectCommandsCountBuffer.get().size == 0) {
       createIndirectCommandCountBuffer();
       markSceneDirty();
     }
@@ -275,7 +275,7 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary(vk::CommandBuffer cmd_bu
 
   {
     uint32_t desiredAABBCount = relemsCount;
-    uint32_t currentCount = uint32_t(aabbBuffer.get().current_size / sizeof(AABB));
+    uint32_t currentCount = uint32_t(aabbBuffer.get().size / sizeof(AABB));
     if (currentCount < desiredAABBCount) {
       recreateAABBBuffer(desiredAABBCount);
       markAABBsDirty();
@@ -284,7 +284,7 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary(vk::CommandBuffer cmd_bu
 
   {
     uint32_t desiredLightsCount = uint32_t(lightsVector.size());
-    uint32_t currentCount = uint32_t(lights.get().current_size / sizeof(GBufferLightResolver::Light));
+    uint32_t currentCount = uint32_t(lights.get().size / sizeof(GBufferLightResolver::Light));
     if (currentCount < desiredLightsCount) {
       recreateLights(desiredLightsCount);
       markSceneDirty();
@@ -385,11 +385,11 @@ void WorldRenderer::cullMeshes(vk::CommandBuffer cmd_buf, const Camera& camera) 
   frustum.bottom = transform_plane(frustum.bottom, invView);
 
   culler.run(cmd_buf,
-    drawParams.get(), 
-    aabbBuffer.get(), 
-    indirectCommandsBuffer.get(), 
-    drawParamsCulledIndicesBuffer.get(), 
-    instanceMeshToIndirectCommandMap.get(),
+    drawParams.get().buffer, 
+    aabbBuffer.get().buffer, 
+    indirectCommandsBuffer.get().buffer, 
+    drawParamsCulledIndicesBuffer.get().buffer, 
+    instanceMeshToIndirectCommandMap.get().buffer,
     uint32_t(sceneMgr->getInstanceMeshes().size()), frustum);
 }
 
@@ -400,10 +400,10 @@ void WorldRenderer::generateGBuffer(
     return;
 
   gbufferDrawer.run(cmd_buf,
-    drawParams.get(),
-    indirectCommandsBuffer.get(),
-    drawParamsCulledIndicesBuffer.get(),
-    indirectCommandsCountBuffer.get(),
+    drawParams.get().buffer,
+    indirectCommandsBuffer.get().buffer,
+    drawParamsCulledIndicesBuffer.get().buffer,
+    indirectCommandsCountBuffer.get().buffer,
     albedoImage.get().get(),
     albedoImage.get().getView({}),
     normalsImage.get().get(),
@@ -424,7 +424,7 @@ void WorldRenderer::resolveGBufferWithLights(
     return;
 
   lightGBufferResolver.run(cmd_buf,
-    lights.get(),
+    lights.get().buffer,
     uint32_t(lightsVector.size()),
     albedoImage.get(),
     normalsImage.get(),
@@ -453,12 +453,5 @@ void WorldRenderer::renderWorld(
     generateGBuffer(cmd_buf, worldViewProj);
 
     resolveGBufferWithLights(cmd_buf, worldViewProj, target_image, target_image_view);
-
-    drawParams.get().resetAccumulatedUsage();
-    drawParamsCulledIndicesBuffer.get().resetAccumulatedUsage();
-    instanceMeshToIndirectCommandMap.get().resetAccumulatedUsage();
-    aabbBuffer.get().resetAccumulatedUsage();
-    indirectCommandsBuffer.get().resetAccumulatedUsage();
-    indirectCommandsCountBuffer.get().resetAccumulatedUsage();
   }
 }

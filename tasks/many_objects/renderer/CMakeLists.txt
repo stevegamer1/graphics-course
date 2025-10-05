@@ -7,7 +7,6 @@ add_executable(many_objects_renderer
   stages/CullingManager.cpp
   stages/IndirectDrawManager.cpp
   stages/GBufferDrawer.cpp
-  stages/SynchronizedBuffer.cpp
   stages/AABBCalculator.cpp
   stages/GBufferLightResolver.cpp
 )
