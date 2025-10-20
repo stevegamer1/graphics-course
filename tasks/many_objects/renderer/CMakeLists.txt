@@ -4,6 +4,8 @@ add_executable(many_objects_renderer
   App.cpp
   Renderer.cpp
   WorldRenderer.cpp
+  # scene_transformations/SceneInvertion.cpp
+  stages/SceneUploader.cpp
   stages/CullingManager.cpp
   stages/IndirectDrawManager.cpp
   stages/GBufferDrawer.cpp

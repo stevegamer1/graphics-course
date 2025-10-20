@@ -1,8 +1,13 @@
 #pragma once
+#include "etna/BlockingTransferHelper.hpp"
 #include "etna/Buffer.hpp"
+#include "etna/GpuSharedResource.hpp"
 #include "etna/GraphicsPipeline.hpp"
+#include "etna/OneShotCmdMgr.hpp"
+#include "etna/Sampler.hpp"
 #include <etna/Vulkan.hpp>
 #include <glm/fwd.hpp>
+#include <memory>
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_enums.hpp>
 #include <vulkan/vulkan_handles.hpp>
@@ -13,7 +18,7 @@
 class GBufferDrawer
 {
 public:
-  GBufferDrawer() = default;
+  explicit GBufferDrawer(const etna::GpuWorkCount& work_count);
 
   GBufferDrawer(const GBufferDrawer&) = delete;
   GBufferDrawer(GBufferDrawer&&) = delete;
@@ -23,22 +28,20 @@ public:
   void loadShader();
 
   void createPipeline(
-    vk::Format albedo_format, vk::Format normal_format, vk::Format depth_format,
+    vk::Format albedo_format, vk::Format metal_rough_format, vk::Format normal_format, vk::Format depth_format,
     etna::VertexByteStreamFormatDescription vertex_format_description);
 
-  // void createDepthImage(glm::uvec2 resolution);
-
-  // Synchronizes buffers by itself.
   void run(
     vk::CommandBuffer cmd_buf,
 
-    etna::Buffer& draw_params,
-    etna::Buffer& indirect_commands,
-    etna::Buffer& draw_params_indices,
-    etna::Buffer& commands_count,
+    const etna::Buffer& draw_params,
+    const etna::Buffer& indirect_commands,
+    const etna::Buffer& draw_params_indices,
 
     vk::Image albedo_image,
     vk::ImageView albedo_image_view,
+    vk::Image metallic_roughness_image,
+    vk::ImageView metallic_roughness_image_view,
     vk::Image normals_image,
     vk::ImageView normals_image_view,
     vk::Image depth_image,
@@ -46,7 +49,15 @@ public:
     vk::Buffer vertex_buffer,
     vk::Buffer index_buffer,
 
+    const etna::Image& base_color_texture,
+    const etna::Image& pbr_metallic_roughness_texture,
+    const etna::Image& normals_texture,
+
+    glm::vec4 albedo_multiplier,
+    glm::vec4 metallic_roughness_multiplier,
+
     glm::uvec2 resolution,
+    uint32_t first_relem,
     uint32_t relems_count,
     glm::mat4 proj_view);
 
@@ -56,9 +67,34 @@ private:
     glm::mat4x4 projView;
   };
 
-  // etna::Image mainViewDepth;
-  // const vk::Format DEPTH_ATTACHMENT_FORMAT = vk::Format::eD32Sfloat;
+  const vk::PipelineColorBlendAttachmentState albedoAttachmentState = vk::PipelineColorBlendAttachmentState{
+    .blendEnable = vk::False,
+    .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+      vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+  };
+  const vk::PipelineColorBlendAttachmentState metallicRoughnessAttachmentState = vk::PipelineColorBlendAttachmentState{
+    .blendEnable = vk::False,
+    .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+      vk::ColorComponentFlagBits::eB,
+  };
+  const vk::PipelineColorBlendAttachmentState normalsAttachmentState = vk::PipelineColorBlendAttachmentState{
+    .blendEnable = vk::False,
+    .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG,
+  };
+
+  struct Uniforms {
+    glm::vec4 albedoMultiplierAndPadding;
+    glm::vec3 metallicRoughnessMultiplier;
+  };
+
+  etna::GpuSharedResource<etna::Buffer> textures_multipliers_uniform_buffer;
+
+  void uploadUniforms(const Uniforms& uniforms);
 
   etna::GraphicsPipeline pipeline;
+  etna::Sampler defaultSampler;
   const char* PROGRAM_NAME = "gbuffer_generate_program";
+
+  std::unique_ptr<etna::OneShotCmdMgr> oneShotMgr;
+  etna::BlockingTransferHelper transferHelper;
 };

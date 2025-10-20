@@ -21,10 +21,10 @@ void AABBCalculator::createPipeline() {
 void AABBCalculator::run(vk::CommandBuffer cmd_buf,
 
     etna::Buffer& aabbs,
-    etna::Buffer& indirect_commands,
+    const etna::Buffer& indirect_commands,
 
-    etna::Buffer& vertex_buffer,
-    etna::Buffer& index_buffer,
+    const etna::Buffer& vertex_buffer,
+    const etna::Buffer& index_buffer,
 
     uint32_t relem_count) {
     etna::set_state(cmd_buf, aabbs.get(),

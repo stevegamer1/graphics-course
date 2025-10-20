@@ -152,6 +152,7 @@ void GBufferLightResolver::run(
     uint32_t lights_count,
 
     etna::Image& albedo_image,
+    etna::Image& metallic_roughness_image,
     etna::Image& normals_image,
     etna::Image& depth_image,
     vk::Image color_image,
@@ -174,6 +175,15 @@ void GBufferLightResolver::run(
   etna::set_state(
     cmd_buf,
     albedo_image.get(),
+    vk::PipelineStageFlagBits2::eFragmentShader,
+    vk::AccessFlagBits2::eShaderSampledRead,
+    vk::ImageLayout::eShaderReadOnlyOptimal,
+    vk::ImageAspectFlagBits::eColor
+  );
+
+  etna::set_state(
+    cmd_buf,
+    metallic_roughness_image.get(),
     vk::PipelineStageFlagBits2::eFragmentShader,
     vk::AccessFlagBits2::eShaderSampledRead,
     vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -223,8 +233,9 @@ void GBufferLightResolver::run(
         {
           etna::Binding{0, lights.genBinding()},
           etna::Binding{1, albedo_image.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
-          etna::Binding{2, normals_image.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
-          etna::Binding{3, depth_image.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+          etna::Binding{2, metallic_roughness_image.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+          etna::Binding{3, normals_image.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+          etna::Binding{4, depth_image.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
         });
 
       cmd_buf.bindDescriptorSets(

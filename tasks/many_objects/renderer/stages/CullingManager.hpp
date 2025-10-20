@@ -39,11 +39,11 @@ public:
   void run(
     vk::CommandBuffer cmd_buf,
 
-    etna::Buffer& draw_params,
-    etna::Buffer& aabbs,
-    etna::Buffer& indirect_commands,
-    etna::Buffer& draw_params_indices,
-    etna::Buffer& command_indices,
+    const etna::Buffer& draw_params,
+    const etna::Buffer& aabbs,
+    const etna::Buffer& indirect_commands,
+    const etna::Buffer& draw_params_indices,
+    const etna::Buffer& command_indices,
 
     uint32_t instance_count,
     const Frustum& camera_frustum);

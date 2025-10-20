@@ -1,5 +1,7 @@
 #include "SceneManager.hpp"
+#include "scene/SceneManager.hpp"
 
+#include <glm/fwd.hpp>
 #include <stack>
 
 #include <spdlog/spdlog.h>
@@ -8,7 +10,9 @@
 #include <glm/gtc/quaternion.hpp>
 #include <etna/GlobalContext.hpp>
 #include <etna/OneShotCmdMgr.hpp>
+#include <string>
 #include <vulkan/vulkan_enums.hpp>
+#include <vulkan/vulkan_structs.hpp>
 
 
 SceneManager::SceneManager()
@@ -48,10 +52,105 @@ std::optional<tinygltf::Model> SceneManager::loadModel(std::filesystem::path pat
     spdlog::warn("glTF: {}", warning);
 
   if (
-    !model.extensions.empty() || !model.extensionsRequired.empty() || !model.extensionsUsed.empty())
-    spdlog::warn("glTF: No glTF extensions are currently implemented!");
+    !model.extensions.empty() || !model.extensionsRequired.empty() || !model.extensionsUsed.empty()) {
+    std::stringstream info;
+    info << "glTF: No glTF extensions are currently implemented!\n";
+
+    if (!model.extensions.empty()) {
+      info << "Model has these extensions:\n";
+      for (const tinygltf::ExtensionMap::value_type& e : model.extensions) {
+        info << e.first << "\n";
+      }
+    }
+
+    if (!model.extensionsRequired.empty()) {
+      info << "Model requires these extensions:\n";
+      for (const std::string& e : model.extensionsRequired) {
+        info << e << "\n";
+      }
+    }
+
+    if (!model.extensionsUsed.empty()) {
+      info << "Model uses these extensions:\n";
+      for (const std::string& e : model.extensionsUsed) {
+        info << e << "\n";
+      }
+    }
+
+    spdlog::warn(info.str());
+  }
 
   return model;
+}
+
+SceneManager::ProcessedMaterials SceneManager::processMaterials(const tinygltf::Model& model) const
+{
+  ProcessedMaterials result;
+
+  // TODO: support image and texture concept separation.
+  result.textures.reserve(model.textures.size() + 2);
+  const TextureID blankColorTexture = TextureID{static_cast<uint32_t>(model.textures.size())};
+  const TextureID blankNormalsTexture = TextureID{static_cast<uint32_t>(model.textures.size() + 1)};
+  for (const tinygltf::Texture& texture : model.textures) {
+    const tinygltf::Image& image = model.images[texture.source];
+    ProcessedImage& resultImg = result.textures.emplace_back();
+    resultImg.data.resize(image.image.size());
+    for (std::uint32_t i = 0; i < image.image.size(); ++i) {
+      resultImg.data[i] = static_cast<std::byte>(image.image[i]);
+    }
+    resultImg.extent = {static_cast<std::uint32_t>(image.width), static_cast<std::uint32_t>(image.height), 1};
+    resultImg.name = image.name;
+  }
+
+  result.textures.emplace_back(
+    "White Image",
+    vk::Extent3D{1, 1, 1},
+    std::vector<std::byte>(4, std::byte{255})
+  );
+
+  std::vector<std::byte> verticalNormalsImageData = {std::byte{127}, std::byte{127}, std::byte{255}, std::byte{0}};
+  result.textures.emplace_back(
+    "Vertical Normals Image",
+    vk::Extent3D{1, 1, 1},
+    verticalNormalsImageData
+  );
+
+  result.materials.reserve(model.materials.size());
+
+  for (const tinygltf::Material& material : model.materials) {
+    std::int32_t baseTexIndex = material.pbrMetallicRoughness.baseColorTexture.index;
+    std::int32_t metalRoughTexIndex = material.pbrMetallicRoughness.metallicRoughnessTexture.index;
+    std::int32_t normalsTexIndex = material.normalTexture.index;
+
+    std::int32_t baseImageIndex = baseTexIndex >= 0 ? model.textures[baseTexIndex].source : -1;
+    std::int32_t metalRoughImageIndex = metalRoughTexIndex >= 0 ? model.textures[metalRoughTexIndex].source : -1;
+    std::int32_t normalsImageIndex = normalsTexIndex >= 0 ? model.textures[normalsTexIndex].source : -1;
+
+    TextureID baseTexture = baseImageIndex >= 0 ? static_cast<TextureID>(baseImageIndex) : blankColorTexture;
+    TextureID metallicRoughnessTexture = metalRoughImageIndex >= 0 ? static_cast<TextureID>(metalRoughImageIndex) : blankColorTexture;
+    TextureID normalsTexture = normalsImageIndex >= 0 ? static_cast<TextureID>(normalsImageIndex) : blankNormalsTexture;
+    
+    std::vector<double> baseColorFactor = material.pbrMetallicRoughness.baseColorFactor;
+    double metallicFactor = material.pbrMetallicRoughness.metallicFactor;
+    double roughnessFactor = material.pbrMetallicRoughness.roughnessFactor;
+    glm::vec3 baseColorMultiplier(baseColorFactor[0], baseColorFactor[1], baseColorFactor[2]);
+    glm::vec3 metallicRoughnessMultiplier(1.0f, metallicFactor, roughnessFactor);
+
+    result.materials.push_back(Material{
+      .textures = {
+        baseTexture,
+        metallicRoughnessTexture,
+        normalsTexture
+      },
+      .texturesScalarMultipliers = {
+        baseColorMultiplier,
+        metallicRoughnessMultiplier,
+        glm::vec3(1.0f)
+      }
+    });
+  }
+
+  return result;
 }
 
 SceneManager::ProcessedInstances SceneManager::processInstances(const tinygltf::Model& model) const
@@ -239,6 +338,7 @@ SceneManager::ProcessedMeshes SceneManager::processMeshes(const tinygltf::Model&
         .vertexOffset = static_cast<std::uint32_t>(result.vertices.size()),
         .indexOffset = static_cast<std::uint32_t>(result.indices.size()),
         .indexCount = static_cast<std::uint32_t>(accessors[0]->count),
+        .material = MaterialID{static_cast<uint32_t>(prim.material)}
       });
 
       const std::size_t vertexCount = accessors[1]->count;
@@ -352,7 +452,7 @@ SceneManager::ProcessedMeshes SceneManager::processMeshes(const tinygltf::Model&
 }
 
 void SceneManager::uploadData(
-  std::span<const Vertex> vertices, std::span<const std::uint32_t> indices)
+  std::span<const Vertex> vertices, std::span<const std::uint32_t> indices, std::span<ProcessedImage> processed_textures)
 {
   unifiedVbuf = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
     .size = vertices.size_bytes(),
@@ -370,6 +470,21 @@ void SceneManager::uploadData(
 
   transferHelper.uploadBuffer<Vertex>(*oneShotCommands, unifiedVbuf, 0, vertices);
   transferHelper.uploadBuffer<std::uint32_t>(*oneShotCommands, unifiedIbuf, 0, indices);
+
+  images.reserve(processed_textures.size());
+  for (uint32_t i = 0; i < processed_textures.size(); ++i) {
+    images.push_back(etna::get_context().createImage(etna::Image::CreateInfo{
+      .extent = processed_textures[i].extent,
+      .name = processed_textures[i].name,
+      // TODO: format depends on the type of texture
+      .format = vk::Format::eR8G8B8A8Unorm,
+      .imageUsage =
+        vk::ImageUsageFlagBits::eSampled |
+        vk::ImageUsageFlagBits::eTransferDst
+    }));
+
+    transferHelper.uploadImage(*oneShotCommands, images.back(), 0, 0, processed_textures[i].data);
+  }
 }
 
 void SceneManager::selectScene(std::filesystem::path path)
@@ -384,7 +499,9 @@ void SceneManager::selectScene(std::filesystem::path path)
   // we guarantee that we don't forget to clear something
   // when re-loading a scene.
 
-  // NOTE: you might want to store these on the GPU for GPU-driven rendering.
+  auto [textures, maters] = processMaterials(model);
+  materials = maters;
+
   auto [instMats, instMeshes] = processInstances(model);
   instanceMatrices = std::move(instMats);
   instanceMeshes = std::move(instMeshes);
@@ -394,7 +511,7 @@ void SceneManager::selectScene(std::filesystem::path path)
   renderElements = std::move(relems);
   meshes = std::move(meshs);
 
-  uploadData(verts, inds);
+  uploadData(verts, inds, textures);
 }
 
 etna::VertexByteStreamFormatDescription SceneManager::getVertexFormatDescription()

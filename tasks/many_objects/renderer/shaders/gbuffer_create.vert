@@ -27,7 +27,7 @@ layout (location = 0 ) out VS_OUT
 {
   vec3 wPos;
   vec3 wNorm;
-  vec3 wTangent;
+  vec4 wTangent;
   vec2 texCoord;
 } vOut;
 
@@ -42,7 +42,7 @@ void main(void)
 
   vOut.wPos   = (mModel * vec4(vPosNorm.xyz, 1.0f)).xyz;
   vOut.wNorm  = normalize(mat3(transpose(inverse(mModel))) * wNorm.xyz);
-  vOut.wTangent = normalize(mat3(transpose(inverse(mModel))) * wTang.xyz);
+  vOut.wTangent = vec4(normalize(mat3(transpose(inverse(mModel))) * wTang.xyz), wTang.w);
   vOut.texCoord = vTexCoordAndTang.xy;
 
   gl_Position   = params.mProjView * vec4(vOut.wPos, 1.0);

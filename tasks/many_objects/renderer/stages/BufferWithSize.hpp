@@ -6,5 +6,5 @@
 
 struct BufferWithSize {
     etna::Buffer buffer;
-    size_t size;
+    size_t size{};
 };

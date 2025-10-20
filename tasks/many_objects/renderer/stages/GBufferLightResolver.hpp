@@ -51,6 +51,7 @@ public:
     uint32_t lights_count,
 
     etna::Image& albedo_image,
+    etna::Image& metallic_roughness_image,
     etna::Image& normals_image,
     etna::Image& depth_image,
     vk::Image color_image,
