@@ -1,6 +1,7 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_nonuniform_qualifier : require
 
 
 layout(location = 0) out vec4 out_albedo;
@@ -13,17 +14,27 @@ layout(location = 0) in VS_OUT
   vec3 wNorm;
   vec4 wTangent;
   vec2 texCoord;
+  flat uint instanceIndex;
 } surf;
 
-// Starting from 2 because of 2 vertex shader bindings. Will be solved when I add bindless.
-layout(set = 0, binding = 2) uniform sampler2D baseColor;
-layout(set = 0, binding = 3) uniform sampler2D metallicRoughness;
-layout(set = 0, binding = 4) uniform sampler2D normalTex;
+struct PBRMaterial {
+  uint albedoIndex;
+  uint metallicRoughnessIndex;
+  uint normalsIndex;
+  vec4 albedoMultiplier;
+  vec4 metallicRoughnessMultiplier;
+  vec4 normalsMultiplier;
+};
 
-layout(set = 0, binding = 5) uniform Uniforms {
-  vec4 baseColorMultiplierAndPadding;
-  vec3 metallicRoughnessMultiplier;
-} uniforms;
+layout(set = 0, binding = 2) readonly buffer Materials {
+  PBRMaterial mats[];
+} materials;
+
+layout(set = 0, binding = 3) readonly buffer InstanceToMaterialMap {
+  uint indices[];
+} instanceToMaterialMap;
+
+layout(set = 1, binding = 0) uniform sampler2D pbrTextures[];
 
 const uint FLAG_ZSIGN = (uint(1) << 0);
 
@@ -33,8 +44,9 @@ float flagsToAlbedoAlpha(uint flags) {
 
 void main()
 {
-  const vec3 surfaceColor = texture(baseColor, surf.texCoord).rgb * uniforms.baseColorMultiplierAndPadding.rgb;
-  // const vec3 surfaceColor = vec3(1);
+  PBRMaterial mat = materials.mats[instanceToMaterialMap.indices[surf.instanceIndex]];
+
+  vec3 surfaceColor = texture(pbrTextures[nonuniformEXT(mat.albedoIndex)], surf.texCoord).rgb * mat.albedoMultiplier.rgb;
 
   const vec3 wNormal = normalize(surf.wNorm);
   // const vec3 wTangent = normalize(surf.wTangent.xyz);  // This is the correct way after using MikkTSpace on CPU.
@@ -53,12 +65,9 @@ void main()
   out_albedo.rgb = surfaceColor;
   out_albedo.a = flagsToAlbedoAlpha(flags);
 
-  vec3 sampledNormal = normalize(texture(normalTex, surf.texCoord).xyz * 2.0f - vec3(1.0f));
-  // sampledNormal = normalize(pow(texture(normalTex, surf.texCoord).rgb, vec3(1.0f / 2.2f)) * 2.0f - vec3(1.0f));  // DEBUG!!!!!!
-  sampledNormal = normalize(texture(normalTex, surf.texCoord).rgb * 2.0f - vec3(1.0f));  // DEBUG!!!!!!
-  // vec3 sampledNormal = vec3(0.0f, 0.0f, 1.0f);
+  vec3 sampledNormal = normalize(texture(pbrTextures[nonuniformEXT(mat.normalsIndex)], surf.texCoord).xyz * 2.0f - vec3(1.0f));
   sampledNormal.z = max(sampledNormal.z, 0.0f);
   out_normal.rg = (normalize(sampledNormal.x * wTangent + sampledNormal.y * wBitangent + sampledNormal.z * wNormal)).xy;
 
-  out_metallicRoughness = texture(metallicRoughness, surf.texCoord).rgb * uniforms.metallicRoughnessMultiplier;
+  out_metallicRoughness = texture(pbrTextures[nonuniformEXT(mat.metallicRoughnessIndex)], surf.texCoord).rgb * mat.metallicRoughnessMultiplier.rgb;
 }

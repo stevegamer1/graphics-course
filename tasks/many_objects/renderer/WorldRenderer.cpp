@@ -4,7 +4,6 @@
 #include "etna/Etna.hpp"
 #include "etna/Image.hpp"
 #include "scene/SceneManager.hpp"
-#include "scene_transformations/SceneInvertion.hpp"
 #include "stages/CullingManager.hpp"
 #include "stages/GBufferDrawer.hpp"
 #include "stages/GBufferLightResolver.hpp"
@@ -46,7 +45,7 @@ WorldRenderer::WorldRenderer(const etna::GpuWorkCount& work_count)
   , metallicRoughnessImage(work_count, std::in_place_t{})
   , normalsImage(work_count, std::in_place_t{})
   , depthImage(work_count, std::in_place_t{})
-  , gbufferDrawer(work_count)
+  , gbufferDrawer()
 {
 }
 
@@ -62,6 +61,8 @@ void WorldRenderer::loadScene(std::filesystem::path path)
   // invertedSceneView = invert_scene(*sceneMgr);
   sceneUploader.updateScene(*sceneMgr);
   recreateAndUploadBuffersIfNecessary();
+  gbufferDrawer.updateTexturesDescriptorSet(sceneMgr->getImages());
+  loaded = true;
 }
 
 void WorldRenderer::loadShaders()
@@ -97,41 +98,8 @@ void WorldRenderer::update(const FramePacket& packet)
   }
 }
 
-// TODO: use this instead of copypasta
-void WorldRenderer::recreateBufferIfNecessary(
-    etna::GpuSharedResource<BufferWithSize>& buffer,
-    size_t desired_size,
-    vk::BufferUsageFlags buf_usage,
-    VmaMemoryUsage mem_usage,
-    std::string_view name
-  ) {
-  buffer.iterate([desired_size, buf_usage, mem_usage, name](BufferWithSize& buffer){
-    if (buffer.size == desired_size) {
-      return;
-    }
-
-    buffer.buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
-      .size = desired_size,
-      .bufferUsage = buf_usage,
-      .memoryUsage = mem_usage,
-      .name = name,
-    });
-  });
-}
-
 void WorldRenderer::recreateDrawParamsBuffers(uint32_t count) {
-  // size_t drawParamsSize = sizeof(SingleRelemDrawParams) * count;
   size_t culledIndicesSize = sizeof(uint32_t) * count;
-
-  // drawParams.iterate([drawParamsSize](BufferWithSize& buffer) {
-  //   buffer.buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
-  //     .size = drawParamsSize,
-  //     .bufferUsage = vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-  //     .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
-  //     .name = "drawParams",
-  //   });
-  //   buffer.size = drawParamsSize;
-  // });
 
   drawParamsCulledIndicesBuffer.iterate([culledIndicesSize](BufferWithSize& buffer){
     buffer.buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
@@ -144,32 +112,6 @@ void WorldRenderer::recreateDrawParamsBuffers(uint32_t count) {
   });
 }
 
-// void WorldRenderer::recreateIndirectCommandsBuffer(uint32_t count) {
-//   size_t size = sizeof(vk::DrawIndexedIndirectCommand) * count;
-//   indirectCommandsBuffer.iterate([size](BufferWithSize& buffer){
-//     buffer.buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
-//       .size = size,
-//       .bufferUsage = vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-//       .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
-//       .name = "indirectCommands",
-//     });
-//     buffer.size = size;
-//   });
-// }
-
-// void WorldRenderer::createIndirectCommandCountBuffer() {
-//   size_t size = sizeof(uint32_t);
-//   indirectCommandsCountBuffer.iterate([size](BufferWithSize& buffer) {
-//     buffer.buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
-//       .size = size,
-//       .bufferUsage = vk::BufferUsageFlagBits::eIndirectBuffer | vk::BufferUsageFlagBits::eTransferDst,
-//       .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
-//       .name = "indirectCommandCountBuffer"
-//     });
-//     buffer.size = size;
-//   });
-// }
-
 void WorldRenderer::recreateAABBBuffer(uint32_t count) {
   size_t size = sizeof(AABB) * count;
   aabbBuffer.buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
@@ -180,19 +122,6 @@ void WorldRenderer::recreateAABBBuffer(uint32_t count) {
   });
   aabbBuffer.size = size;
 }
-
-// void WorldRenderer::recreateInstancesToCommandsMapBuffer(uint32_t count) {
-//   size_t size = sizeof(uint32_t) * count;
-//   instanceMeshToIndirectCommandMap.iterate([size](BufferWithSize& buffer) {
-//     buffer.buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
-//       .size = size,
-//       .bufferUsage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-//       .memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY,
-//       .name = "instanceMeshToIndirectCommandMap"
-//     });
-//     buffer.size = size;
-//   });
-// }
 
 void WorldRenderer::recreateLights(uint32_t count) {
   size_t size = sizeof(GBufferLightResolver::Light) * count;
@@ -214,82 +143,6 @@ void WorldRenderer::recalculateAABBs(vk::CommandBuffer cmd_buf) {
     uint32_t(sceneMgr->getRenderElements().size()));
 }
 
-// std::map<RelemID, std::vector<SingleRelemDrawParams>> WorldRenderer::collectRelemsDrawParamsForIndirect() {
-//   std::map<RelemID, std::vector<SingleRelemDrawParams>> result;
-
-//   auto instanceMatrices = sceneMgr->getInstanceMatrices();
-//   auto instanceMeshes = sceneMgr->getInstanceMeshes();
-//   auto meshes = sceneMgr->getMeshes();
-//   for (std::size_t instIdx = 0; instIdx < instanceMeshes.size(); ++instIdx)
-//   {
-//     const auto meshIdx = instanceMeshes[instIdx];
-
-//     for (std::size_t j = 0; j < meshes[meshIdx].relemCount; ++j)
-//     {
-//       const auto relemIdx = meshes[meshIdx].firstRelem + j;
-//       result[static_cast<RelemID>(relemIdx)].push_back({
-//         instanceMatrices[instIdx]
-//       });
-//     }
-//   }
-
-//   return result;
-// }
-
-// WorldRenderer::BuffersForDrawIndexedIndirectCount WorldRenderer::prepareDrawParamsBuffersOnCPU() {
-//   BuffersForDrawIndexedIndirectCount result;
-
-//   // auto relems = sceneMgr->getRenderElements();
-
-//   // const size_t materialsCount = invertedSceneView->materials.size();
-//   // for (uint32_t m = 0; m < materialsCount; ++m) {
-//   //   const InvertedMaterial& material = invertedSceneView->materials[m];
-//   //   const size_t relemsCount = material.relemCount;
-
-//   //   for (uint32_t r = 0; r < relemsCount; ++r) {
-//   //     uint32_t relemIndex = static_cast<uint32_t>(material.renderElements[r]);
-//   //     const InvertedRelem& relem = invertedSceneView->relems[relemIndex];
-
-//   //     result.commands.push_back(vk::DrawIndexedIndirectCommand{
-//   //       .indexCount = relems[relemIndex].indexCount,
-//   //       .instanceCount = static_cast<uint32_t>(relem.instances.size()),
-//   //       .firstIndex = relems[relemIndex].indexOffset,
-//   //       .vertexOffset = static_cast<int32_t>(relems[relemIndex].vertexOffset),
-//   //       .firstInstance = static_cast<uint32_t>(relem.instances[0])
-//   //     });
-//   //   }
-//   // }
-
-//   result.commands.reserve(invertedSceneView->relems.size());
-//   for (uint32_t r = 0; r < invertedSceneView->relems.size(); ++r) {
-//     result.commands.push_back(vk::DrawIndexedIndirectCommand{
-//       .indexCount = invertedSceneView->relems[r].indexCount,
-//       .instanceCount = invertedSceneView->relems[r].instanceCount,
-//       .firstIndex = invertedSceneView->relems[r].firstIndex,
-//       .vertexOffset = invertedSceneView->relems[r].vertexOffset,
-//       .firstInstance = static_cast<uint32_t>(invertedSceneView->relems[r].firstInstance)
-//     });
-//   }
-
-//   return result;
-// }
-
-// WorldRenderer::BuffersForCulling WorldRenderer::prepareCullingBuffersOnCPU(const std::vector<vk::DrawIndexedIndirectCommand>& commands) {
-//   BuffersForCulling result;
-
-//   const size_t commandsCount = commands.size();
-//   for (uint32_t c = 0; c < commandsCount; ++c) {
-
-//     uint32_t instanceCount = commands[c].instanceCount;
-//     for (uint32_t i = 0; i < instanceCount; ++i) {
-      
-//       result.instanceToIndirectCommandMap.push_back(c);
-//     }
-//   }
-
-//   return result;
-// }
-
 void WorldRenderer::recreateAndUploadBuffersIfNecessary() {
   uint32_t instancesCount = uint32_t(sceneMgr->getInstanceMeshes().size());
   uint32_t relemsCount = uint32_t(sceneMgr->getRenderElements().size());
@@ -301,28 +154,6 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary() {
       recreateDrawParamsBuffers(desiredDrawParamsCount);
     }
   }
-
-  // {
-  //   uint32_t desiredInstancesToCommandsMapEntryCount = instancesCount;
-  //   uint32_t currentCount = uint32_t(instanceMeshToIndirectCommandMap.get().size / sizeof(uint32_t));
-  //   if (currentCount < desiredInstancesToCommandsMapEntryCount) {
-  //     recreateInstancesToCommandsMapBuffer(desiredInstancesToCommandsMapEntryCount);
-  //   }
-  // }
-
-  // {
-  //   uint32_t desiredCommandsCount = relemsCount;
-  //   uint32_t currentCount = uint32_t(indirectCommandsBuffer.get().size / sizeof(vk::DrawIndexedIndirectCommand));
-  //   if (currentCount < desiredCommandsCount) {
-  //     recreateIndirectCommandsBuffer(desiredCommandsCount);
-  //   }
-  // }
-
-  // {
-  //   if (indirectCommandsCountBuffer.get().size == 0) {
-  //     createIndirectCommandCountBuffer();
-  //   }
-  // }
 
   {
     uint32_t desiredAABBCount = relemsCount;
@@ -351,7 +182,7 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary() {
         .imageUsage =
           vk::ImageUsageFlagBits::eColorAttachment |
           vk::ImageUsageFlagBits::eSampled |
-          vk::ImageUsageFlagBits::eTransferDst  // Need to remove eTransferDst bit when clearing will be done by LoadOp of G-Buffer generator, but that's after implementing bindless.
+          vk::ImageUsageFlagBits::eTransferDst
       });
     });
     albedoImageResolution = resolution;
@@ -367,7 +198,7 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary() {
         .imageUsage =
           vk::ImageUsageFlagBits::eColorAttachment |
           vk::ImageUsageFlagBits::eSampled |
-          vk::ImageUsageFlagBits::eTransferDst  // Need to remove eTransferDst bit when clearing will be done by LoadOp of G-Buffer generator, but that's after implementing bindless.
+          vk::ImageUsageFlagBits::eTransferDst
       });
     });
     metallicRoughnessImageResolution = resolution;
@@ -383,7 +214,7 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary() {
         .imageUsage =
           vk::ImageUsageFlagBits::eColorAttachment |
           vk::ImageUsageFlagBits::eSampled |
-          vk::ImageUsageFlagBits::eTransferDst  // Need to remove eTransferDst bit when clearing will be done by LoadOp of G-Buffer generator, but that's after implementing bindless.
+          vk::ImageUsageFlagBits::eTransferDst
       });
     });
     normalsImageResolution = resolution;
@@ -399,45 +230,12 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary() {
         .imageUsage =
           vk::ImageUsageFlagBits::eDepthStencilAttachment |
           vk::ImageUsageFlagBits::eSampled |
-          vk::ImageUsageFlagBits::eTransferDst  // Need to remove eTransferDst bit when clearing will be done by LoadOp of G-Buffer generator, but that's after implementing bindless.
+          vk::ImageUsageFlagBits::eTransferDst
       });
     });
     depthImageResolution = resolution;
   }
 
-  
-  // BuffersForDrawIndexedIndirectCount cpuBuffersForIndirectDraw = prepareDrawParamsBuffersOnCPU();
-  // BuffersForCulling cullingBuffers = prepareCullingBuffersOnCPU(cpuBuffersForIndirectDraw.commands);
-
-  // drawParams.iterate([this](BufferWithSize& buffer){
-  //   transferHelper.uploadBuffer(
-  //     *oneShotCommands, 
-  //     buffer.buffer, 0, 
-  //     std::span<const SingleRelemDrawParams>(invertedSceneView->instances));
-  // });
-  
-  // instanceMeshToIndirectCommandMap.iterate([this, cullingBuffers](BufferWithSize& buffer){
-  //   transferHelper.uploadBuffer(
-  //     *oneShotCommands, 
-  //     buffer.buffer, 0,
-  //     std::span<const uint32_t>(cullingBuffers.instanceToIndirectCommandMap));
-  // });
-
-  // indirectCommandsBuffer.iterate([this, cpuBuffersForIndirectDraw](BufferWithSize& buffer) {
-  //   transferHelper.uploadBuffer(
-  //     *oneShotCommands, 
-  //     buffer.buffer, 0, 
-  //     std::span<const vk::DrawIndexedIndirectCommand>(cpuBuffersForIndirectDraw.commands));
-  // });
-  
-  // std::vector<uint32_t> countVector{uint32_t(cpuBuffersForIndirectDraw.commands.size())};
-  // indirectCommandsCountBuffer.iterate([this, countVector](BufferWithSize& buffer) {
-  //   transferHelper.uploadBuffer(
-  //     *oneShotCommands, 
-  //     buffer.buffer, 0, 
-  //     std::span<const uint32_t>(countVector));
-  // });
-  
   using Light = GBufferLightResolver::Light;
   transferHelper.uploadBuffer(
     *oneShotCommands,
@@ -472,11 +270,10 @@ void WorldRenderer::cullMeshes(vk::CommandBuffer cmd_buf, const Camera& camera) 
     aabbBuffer.buffer, 
     sceneUploader.getIndirectCommandsBuffer().buffer, 
     drawParamsCulledIndicesBuffer.get().buffer, 
-    sceneUploader.debugInstancesToCommandsMapOnGPU.buffer,
+    sceneUploader.getInstancesToCommandsBuffer().buffer,
     uint32_t(sceneMgr->getInstanceMeshes().size()), frustum);
 }
 
-// Will remove when I add bindless.
 void WorldRenderer::clearAttachments(vk::CommandBuffer cmd_buf)
 {
   vk::ImageLayout layout = vk::ImageLayout::eTransferDstOptimal;
@@ -575,15 +372,12 @@ void WorldRenderer::generateGBuffer(
   vk::ImageView normalsView = normalsImage.get().getView({});
   vk::ImageView depthView = depthImage.get().getView({});
 
-  // When I add bindless, I will not pass these.
-  TextureID pbrBaseColorId = sceneUploader.debugMaterialsOnCPU[first_command + 3].textures[0];
-  TextureID pbrMetallicRoughnessId = sceneUploader.debugMaterialsOnCPU[first_command + 3].textures[1];
-  TextureID pbrNormalsId = sceneUploader.debugMaterialsOnCPU[first_command + 3].textures[2];
 
   gbufferDrawer.run(cmd_buf,
     sceneUploader.getMatricesBuffer().buffer,
     sceneUploader.getIndirectCommandsBuffer().buffer,
     drawParamsCulledIndicesBuffer.get().buffer,
+    sceneUploader.getInstancesToCommandsBuffer().buffer,
     albedoImage.get().get(),
     albedoView,
     metallicRoughnessImage.get().get(),
@@ -595,12 +389,8 @@ void WorldRenderer::generateGBuffer(
     sceneMgr->getVertexBuffer(),
     sceneMgr->getIndexBuffer(),
 
-    sceneMgr->getImages()[static_cast<uint32_t>(pbrBaseColorId)],
-    sceneMgr->getImages()[static_cast<uint32_t>(pbrMetallicRoughnessId)],
-    sceneMgr->getImages()[static_cast<uint32_t>(pbrNormalsId)],
-
-    sceneUploader.debugMaterialsOnCPU[first_command].textures_factors[0],
-    sceneUploader.debugMaterialsOnCPU[first_command].textures_factors[1],
+    sceneMgr->getImages(),
+    sceneUploader.getMaterialsBuffer().buffer,
 
     resolution,
     first_command,
@@ -638,6 +428,10 @@ void WorldRenderer::renderWorld(
   {
     ETNA_PROFILE_GPU(cmd_buf, renderForward);
 
+    if (!loaded) {
+      return;
+    }
+
     if (aabbsDirty) {
       recalculateAABBs(cmd_buf);
       aabbsDirty = false;
@@ -645,24 +439,7 @@ void WorldRenderer::renderWorld(
 
     cullMeshes(cmd_buf, cameraCopy);
 
-    // generateGBuffer(cmd_buf, worldViewProj);
-
-    // resolveGBufferWithLights(cmd_buf, worldViewProj, target_image, target_image_view);
-
     clearAttachments(cmd_buf);
-
-    // for (uint32_t p = 0; p < invertedSceneView->pipelines.size(); ++p) {
-    //   if (invertedSceneView->pipelines[p].type != PipelineType::PBR) {
-    //     continue;  // TODO: store objects by type, not type inside object
-    //   }
-
-    //   for (uint32_t m = 0; m < invertedSceneView->pipelines[p].materials.size(); ++m) {
-    //     MaterialID materialId = invertedSceneView->pipelines[p].materials[m];
-    //     const InvertedMaterial& material = invertedSceneView->materials[static_cast<uint32_t>(materialId)];
-
-    //     generateGBuffer(cmd_buf, material, worldViewProj);
-    //   }
-    // }
 
     if (sceneUploader.getPipelines().contains(PipelineType::PBR)) {
       SceneUploader::PipelineInfo pbrInfo = sceneUploader.getPipelines().find(PipelineType::PBR)->second;

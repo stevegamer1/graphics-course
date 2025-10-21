@@ -33,7 +33,11 @@ void Renderer::initVulkan(std::span<const char*> instance_extensions)
 
   auto features12 = vk::PhysicalDeviceVulkan12Features {
     .pNext = &featuresDynamicRenderingLocalRead,
-    .drawIndirectCount = vk::True
+    .drawIndirectCount = vk::True,
+    .shaderSampledImageArrayNonUniformIndexing = vk::True,
+    .descriptorBindingPartiallyBound = vk::True,
+    .descriptorBindingVariableDescriptorCount = vk::True,
+    .runtimeDescriptorArray = vk::True,
   };
 
   etna::initialize(etna::InitParams{
@@ -45,7 +49,8 @@ void Renderer::initVulkan(std::span<const char*> instance_extensions)
       .pNext = &features12,
       .features = {
         .independentBlend = vk::True,
-        .multiDrawIndirect = vk::True
+        .multiDrawIndirect = vk::True,
+        .shaderSampledImageArrayDynamicIndexing = vk::True
       }
     },
     .physicalDeviceIndexOverride = {},

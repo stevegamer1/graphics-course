@@ -16,7 +16,6 @@
 #include "etna/GpuSharedResource.hpp"
 #include "etna/OneShotCmdMgr.hpp"
 #include "scene/SceneManager.hpp"
-#include "scene_transformations/SceneInvertion.hpp"
 #include "stages/AABBCalculator.hpp"
 #include "stages/CullingManager.hpp"
 #include "stages/GBufferDrawer.hpp"
@@ -51,7 +50,6 @@ private:
   void clearAttachments(
     vk::CommandBuffer cmd_buf);
 
-  // TODO: make a separate type for PBR material so that only it can be passed in here.
   void generateGBuffer(
     vk::CommandBuffer cmd_buf, uint32_t first_command, uint32_t command_count, const glm::mat4x4& glob_tm);
 
@@ -68,34 +66,10 @@ private:
     glm::vec4 max;
   };
 
-  // struct BuffersForDrawIndexedIndirectCount {
-  //   std::vector<vk::DrawIndexedIndirectCommand> commands;
-  // };
-
-  // struct BuffersForCulling {
-  //   std::vector<uint32_t> instanceToIndirectCommandMap;
-  // };
-
-  // std::map<RelemID, std::vector<SingleRelemDrawParams>> collectRelemsDrawParamsForIndirect();
-  // TODO: rename into std::vector<vk::DrawIndexedIndirectCommand> generateIndirectCommands();
-  // BuffersForDrawIndexedIndirectCount prepareDrawParamsBuffersOnCPU();
-  // TODO: rename into std::vector<uint32_t> generateInstanceToIndirectCommandMap();
-  // BuffersForCulling prepareCullingBuffersOnCPU(const std::vector<vk::DrawIndexedIndirectCommand>& commands);
-
   void recreateDrawParamsBuffers(uint32_t count);
   void recreateIndirectCommandsBuffer(uint32_t count);
-  // void createIndirectCommandCountBuffer();
   void recreateAABBBuffer(uint32_t count);
-  // void recreateInstancesToCommandsMapBuffer(uint32_t count);
   void recreateLights(uint32_t count);
-
-  static void recreateBufferIfNecessary(
-    etna::GpuSharedResource<BufferWithSize>& buffer,
-    size_t desired_size,
-    vk::BufferUsageFlags buf_usage,
-    VmaMemoryUsage mem_usage,
-    std::string_view name
-  );
 
   void recalculateAABBs(vk::CommandBuffer cmd_buf);
 
@@ -103,15 +77,11 @@ private:
   std::unique_ptr<etna::OneShotCmdMgr> oneShotCommands;
   etna::BlockingTransferHelper transferHelper;
   std::unique_ptr<SceneManager> sceneMgr;
-  // std::unique_ptr<InvertedSceneView> invertedSceneView;
+  bool loaded = false;
 
   BufferWithSize lights;
-  // etna::GpuSharedResource<BufferWithSize> drawParams;
   etna::GpuSharedResource<BufferWithSize> drawParamsCulledIndicesBuffer;
-  // etna::GpuSharedResource<BufferWithSize> instanceMeshToIndirectCommandMap;
   BufferWithSize aabbBuffer;
-  // etna::GpuSharedResource<BufferWithSize> indirectCommandsBuffer;
-  // etna::GpuSharedResource<BufferWithSize> indirectCommandsCountBuffer;
 
   etna::GpuSharedResource<etna::Image> albedoImage;
   glm::uvec2 albedoImageResolution {};
@@ -142,17 +112,17 @@ private:
 
   std::vector<GBufferLightResolver::Light> lightsVector = {
     {
-      .posAndIntensity = glm::vec4(1.0f, 1.0f, -1.0f, 3.0f),
+      .posAndIntensity = glm::vec4(1.0f, 1.0f, -1.0f, 1.0f),
       .color = glm::vec3(1.0f, 0.0f, 0.0f),
       .lightType = GBufferLightResolver::Light::LightType::Point
     },
     {
-      .posAndIntensity = glm::vec4(1.0f, 1.0f, 1.0f, 1.5f),
+      .posAndIntensity = glm::vec4(1.0f, 1.0f, 1.0f, 5.0f),
       .color = glm::vec3(1.0f, 1.0f, 1.0f),
       .lightType = GBufferLightResolver::Light::LightType::Directional
     },
     {
-      .posAndIntensity = glm::vec4(0.5f, 0.5f, 1.0f, 0.5f),
+      .posAndIntensity = glm::vec4(0.5f, 0.5f, 1.0f, 0.1f),
       .color = glm::vec3(1.0f, 1.0f, 1.0f),
       .lightType = GBufferLightResolver::Light::LightType::Ambient
     },

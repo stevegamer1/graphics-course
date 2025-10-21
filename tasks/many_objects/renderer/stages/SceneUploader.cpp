@@ -21,7 +21,7 @@ void SceneUploader::updateScene(const SceneManager& scene_manager) {
     std::vector<vk::DrawIndexedIndirectCommand> indirectCommandsVector;
     std::vector<MaterialInfo> materialsVector;
     std::vector<glm::mat4x4> instanceMatricesVector;
-    std::vector<uint32_t> debugInstancesToCommandsMapOnCPU;
+    std::vector<uint32_t> instancesToCommandsMapCPU;
 
     {
         std::span<const Material> sceneMaterials = scene_manager.getMaterials();
@@ -69,7 +69,7 @@ void SceneUploader::updateScene(const SceneManager& scene_manager) {
                     // add matrices
                     for (uint32_t i = 0; i < relemInstances[relemIndex].size(); ++i) {
                         instanceMatricesVector.push_back(sceneInstanceMatrices[i]);
-                        debugInstancesToCommandsMapOnCPU.push_back(static_cast<uint32_t>(indirectCommandsVector.size() - 1));
+                        instancesToCommandsMapCPU.push_back(static_cast<uint32_t>(indirectCommandsVector.size() - 1));
                     }
     
                     // write material
@@ -109,7 +109,6 @@ void SceneUploader::updateScene(const SceneManager& scene_manager) {
         });
         materials.size = desiredMaterialsSize;
     }
-    debugMaterialsOnCPU = materialsVector;
 
     size_t desiredMatricesSize = instanceMatricesVector.size() * sizeof(glm::mat4x4);
     if (matrices.size != desiredMatricesSize) {
@@ -126,18 +125,22 @@ void SceneUploader::updateScene(const SceneManager& scene_manager) {
     transferHelper.uploadBuffer(*oneShotCmdMgr, materials.buffer, 0, std::span<const MaterialInfo>{materialsVector});
     transferHelper.uploadBuffer(*oneShotCmdMgr, matrices.buffer, 0, std::span<const glm::mat4x4>{instanceMatricesVector});
 
-    debugInstancesToCommandsMapOnGPU.buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
-        .size = debugInstancesToCommandsMapOnCPU.size() * sizeof(uint32_t),
+    instancesToCommandsMap.buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
+        .size = instancesToCommandsMapCPU.size() * sizeof(uint32_t),
         .bufferUsage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
         .memoryUsage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
-        .name = "Instance to indirect command map (debug)"
+        .name = "Instances to indirect commands map"
     });
-    debugInstancesToCommandsMapOnGPU.size = debugInstancesToCommandsMapOnCPU.size() * sizeof(uint32_t);
-    transferHelper.uploadBuffer(*oneShotCmdMgr, debugInstancesToCommandsMapOnGPU.buffer, 0, std::span<const uint32_t>(debugInstancesToCommandsMapOnCPU));
+    instancesToCommandsMap.size = instancesToCommandsMapCPU.size() * sizeof(uint32_t);
+    transferHelper.uploadBuffer(*oneShotCmdMgr, instancesToCommandsMap.buffer, 0, std::span<const uint32_t>(instancesToCommandsMapCPU));
 }
 
 const std::unordered_map<PipelineType, SceneUploader::PipelineInfo>& SceneUploader::getPipelines() const {
     return pipelines;
+}
+
+const BufferWithSize& SceneUploader::getInstancesToCommandsBuffer() const {
+    return instancesToCommandsMap;
 }
 
 const BufferWithSize& SceneUploader::getIndirectCommandsBuffer() const {

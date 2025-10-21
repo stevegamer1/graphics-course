@@ -29,6 +29,7 @@ layout (location = 0 ) out VS_OUT
   vec3 wNorm;
   vec4 wTangent;
   vec2 texCoord;
+  uint instanceIndex;
 } vOut;
 
 out gl_PerVertex { vec4 gl_Position; };
@@ -44,6 +45,7 @@ void main(void)
   vOut.wNorm  = normalize(mat3(transpose(inverse(mModel))) * wNorm.xyz);
   vOut.wTangent = vec4(normalize(mat3(transpose(inverse(mModel))) * wTang.xyz), wTang.w);
   vOut.texCoord = vTexCoordAndTang.xy;
+  vOut.instanceIndex = gl_InstanceIndex;
 
   gl_Position   = params.mProjView * vec4(vOut.wPos, 1.0);
 }

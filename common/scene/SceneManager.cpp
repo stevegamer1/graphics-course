@@ -134,7 +134,7 @@ SceneManager::ProcessedMaterials SceneManager::processMaterials(const tinygltf::
     double metallicFactor = material.pbrMetallicRoughness.metallicFactor;
     double roughnessFactor = material.pbrMetallicRoughness.roughnessFactor;
     glm::vec3 baseColorMultiplier(baseColorFactor[0], baseColorFactor[1], baseColorFactor[2]);
-    glm::vec3 metallicRoughnessMultiplier(1.0f, metallicFactor, roughnessFactor);
+    glm::vec3 metallicRoughnessMultiplier(1.0f, roughnessFactor, metallicFactor);
 
     result.materials.push_back(Material{
       .textures = {

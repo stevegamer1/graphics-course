@@ -1,6 +1,4 @@
 #include "GBufferDrawer.hpp"
-#include <cstring>
-#include <utility>
 #include <vector>
 #include <vulkan/vulkan_enums.hpp>
 #include "etna/Buffer.hpp"
@@ -12,21 +10,9 @@
 #include "etna/RenderTargetStates.hpp"
 
 
-GBufferDrawer::GBufferDrawer(const etna::GpuWorkCount& work_count)
-  : textures_multipliers_uniform_buffer{work_count, std::in_place_t{}}
-  , oneShotMgr{etna::get_context().createOneShotCmdMgr()}
-  , transferHelper(etna::BlockingTransferHelper::CreateInfo{ .stagingSize = sizeof(Uniforms) })
+GBufferDrawer::GBufferDrawer()
 {
   defaultSampler = etna::Sampler(etna::Sampler::CreateInfo{.name = "default_sampler"});
-
-  textures_multipliers_uniform_buffer.iterate([](etna::Buffer& buffer){
-    buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
-      .size = sizeof(Uniforms),
-      .bufferUsage = vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eUniformBuffer,
-      .memoryUsage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
-      .name = "Scalar multipliers for PBR textures"
-    });
-  });
 }
 
 void GBufferDrawer::loadShader()
@@ -77,10 +63,19 @@ void GBufferDrawer::createPipeline(
     });
 }
 
-void GBufferDrawer::uploadUniforms(const Uniforms& uniforms) {
-  std::vector<std::byte> vector(sizeof(uniforms));
-  std::memcpy(vector.data(), &uniforms, sizeof(uniforms));
-  transferHelper.uploadBuffer(*oneShotMgr, textures_multipliers_uniform_buffer.get(), 0, vector);
+void GBufferDrawer::updateTexturesDescriptorSet(std::span<const etna::Image> textures) {
+  auto programInfo = etna::get_shader_program(PROGRAM_NAME);
+  std::vector<etna::Binding> bindings;
+
+  for (uint32_t i = 0; i < textures.size(); ++i) {
+    bindings.emplace_back(0, textures[i].genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal), i);
+  }
+
+  texturesDescriptorSet = etna::create_persistent_descriptor_set(
+    programInfo.getDescriptorLayoutId(1),
+    bindings,
+    true
+  );
 }
 
 void GBufferDrawer::run(
@@ -89,6 +84,7 @@ void GBufferDrawer::run(
     const etna::Buffer& draw_params,
     const etna::Buffer& indirect_commands,
     const etna::Buffer& draw_params_indices,
+    const etna::Buffer& instances_to_commands_map,
 
     vk::Image albedo_image,
     vk::ImageView albedo_image_view,
@@ -101,24 +97,14 @@ void GBufferDrawer::run(
     vk::Buffer vertex_buffer,
     vk::Buffer index_buffer,
 
-    const etna::Image& base_color_texture,
-    const etna::Image& pbr_metallic_roughness_texture,
-    const etna::Image& normals_texture,
-
-    glm::vec4 albedo_multiplier,
-    glm::vec4 metallic_roughness_multiplier,
+    std::span<const etna::Image> textures,
+    const etna::Buffer& materials,
 
     glm::uvec2 resolution,
     uint32_t first_relem,
     uint32_t relems_count,
     glm::mat4 proj_view)
 {
-  // TODO: have materials, including multipliers, on GPU.
-  uploadUniforms(Uniforms{
-    .albedoMultiplierAndPadding = albedo_multiplier,
-    .metallicRoughnessMultiplier = metallic_roughness_multiplier
-  });
-
   vk::PipelineStageFlags2 bufferStage =
       vk::PipelineStageFlagBits2::eVertexShader |
       vk::PipelineStageFlagBits2::eFragmentShader |
@@ -155,13 +141,13 @@ void GBufferDrawer::run(
   etna::set_state(cmd_buf, draw_params.get(), bufferStage, bufferAccess);
   etna::set_state(cmd_buf, draw_params_indices.get(), bufferStage, bufferAccess);
   etna::set_state(cmd_buf, indirect_commands.get(), bufferStage, bufferAccess);
-  // etna::set_state(cmd_buf, commands_count.get(), bufferStage, bufferAccess);
+  etna::set_state(cmd_buf, instances_to_commands_map.get(), bufferStage, bufferAccess);
 
-  etna::set_state(cmd_buf, base_color_texture.get(), sampledTexturesStage, sampledTexturesAccess, vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor);
-  etna::set_state(cmd_buf, pbr_metallic_roughness_texture.get(), sampledTexturesStage, sampledTexturesAccess, vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor);
-  etna::set_state(cmd_buf, normals_texture.get(), sampledTexturesStage, sampledTexturesAccess, vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor);
+  for (const etna::Image& texture : textures) {
+    etna::set_state(cmd_buf, texture.get(), sampledTexturesStage, sampledTexturesAccess, vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor);
+  }
 
-  etna::set_state(cmd_buf, textures_multipliers_uniform_buffer.get().get(), vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eUniformRead);
+  etna::set_state(cmd_buf, materials.get(), bufferStage, bufferAccess);
 
   etna::flush_barriers(cmd_buf);
 
@@ -184,20 +170,24 @@ void GBufferDrawer::run(
     {
       auto programInfo = etna::get_shader_program(PROGRAM_NAME);
 
+      std::vector<etna::Binding> bindings;
+
+      bindings.emplace_back(0, draw_params.genBinding());
+      bindings.emplace_back(1, draw_params_indices.genBinding());
+      bindings.emplace_back(2, materials.genBinding());
+      bindings.emplace_back(3, instances_to_commands_map.genBinding());
+
       auto set = etna::create_descriptor_set(
         programInfo.getDescriptorLayoutId(0),
         cmd_buf,
-        {
-          etna::Binding{0, draw_params.genBinding()},
-          etna::Binding{1, draw_params_indices.genBinding()},
-          etna::Binding{2, base_color_texture.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
-          etna::Binding{3, pbr_metallic_roughness_texture.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
-          etna::Binding{4, normals_texture.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
-          etna::Binding{5, textures_multipliers_uniform_buffer.get().genBinding()}
-        });
+        bindings
+      );
+
+      assert(set.isValid());
+      assert(texturesDescriptorSet.isValid());
 
       cmd_buf.bindDescriptorSets(
-        vk::PipelineBindPoint::eGraphics, pipeline.getVkPipelineLayout(), 0, {set.getVkSet()}, {});
+        vk::PipelineBindPoint::eGraphics, pipeline.getVkPipelineLayout(), 0, {set.getVkSet(), texturesDescriptorSet.getVkSet()}, {});
     }
 
     PushConstants pushConst{.projView = proj_view};

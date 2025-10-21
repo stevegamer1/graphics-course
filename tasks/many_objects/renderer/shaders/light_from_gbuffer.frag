@@ -166,8 +166,8 @@ void main()
     // reflectedLight = max(dot(wNormal, normalize(lightVector)), 0.0f) * lightColor * lightIntensity;
 
     vec3 lightColorWithIntensity = lightColor * lightIntensity;
-    float metalness = texture(gBufferMetallicRoughness, uv).g;
-    float roughness = texture(gBufferMetallicRoughness, uv).b;
+    float roughness = texture(gBufferMetallicRoughness, uv).g;
+    float metalness = texture(gBufferMetallicRoughness, uv).b;
     reflectedLight = getReflectedLightPBR(
       lightVector,
       wNormal,
@@ -178,8 +178,7 @@ void main()
       albedo
     );
   } else if (lightType == LIGHT_TYPE_AMBIENT) {
-    const float ambientOcclusion = texture(gBufferMetallicRoughness, uv).r;  // GLTF specification.
-    reflectedLight = albedo * lightIntensity * lightColor * ambientOcclusion;
+    reflectedLight = albedo * lightIntensity * lightColor;
   }
 
   out_color.rgb = reflectedLight;
