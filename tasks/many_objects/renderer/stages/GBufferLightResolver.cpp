@@ -1,4 +1,5 @@
 #include "GBufferLightResolver.hpp"
+#include <cstdint>
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/fwd.hpp>
 #include <vulkan/vulkan_enums.hpp>
@@ -65,6 +66,24 @@ GBufferLightResolver::GBufferLightResolver()
   defaultSampler = etna::Sampler(etna::Sampler::CreateInfo{.name = "default_sampler"});
 }
 
+GBufferLightResolver::Light::Light(glm::vec3 pos, float intensity, glm::vec3 color, bool casts_shadows, LightType type)
+: posAndIntensity(pos, intensity)
+, color(color)
+, padding23_castsShadows1_lightType8(
+    0 |
+    (casts_shadows ? CASTS_SHADOWS_MASK : uint32_t{0}) |
+    uint32_t{static_cast<uint8_t>(type)}
+  )
+{}
+
+bool GBufferLightResolver::Light::castsShadows() const {
+  return (padding23_castsShadows1_lightType8 & CASTS_SHADOWS_MASK) != uint32_t{0};
+}
+
+GBufferLightResolver::Light::LightType GBufferLightResolver::Light::getType() const {
+  return LightType{static_cast<uint8_t>(padding23_castsShadows1_lightType8 & LIGHT_TYPE_MASK)};
+}
+
 void GBufferLightResolver::allocateAndFillResources() {
   size_t vertexBufferSize = sizeof(Vertex) * sphereVertices.size();
   sphereVertexBuffer.buffer = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
@@ -121,7 +140,7 @@ void GBufferLightResolver::createPipeline(
       .rasterizationConfig =
         vk::PipelineRasterizationStateCreateInfo{
           .polygonMode = vk::PolygonMode::eFill,
-          .cullMode = vk::CullModeFlagBits::eFront,  // We want to draw inside the sphere too.
+          .cullMode = vk::CullModeFlagBits::eFront,  // We want to draw the inside of the sphere.
           .frontFace = vk::FrontFace::eCounterClockwise,
           .lineWidth = 1.f,
         },
@@ -145,11 +164,27 @@ void GBufferLightResolver::createPipeline(
     });
 }
 
+void GBufferLightResolver::createShadowmapsDescriptorSet(std::span<etna::Image> lights_shadowmaps) {
+  auto programInfo = etna::get_shader_program(PROGRAM_NAME);
+
+  std::vector<etna::Binding> shadowMapBindings;
+  for (uint32_t i = 0; i < lights_shadowmaps.size(); ++i) {
+    shadowMapBindings.push_back(etna::Binding{0, lights_shadowmaps[i].genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal), i});
+  }
+
+  shadowmapSet = etna::create_persistent_descriptor_set(
+    programInfo.getDescriptorLayoutId(1),
+    shadowMapBindings
+  );
+}
+
 void GBufferLightResolver::run(
   vk::CommandBuffer cmd_buf,
 
     etna::Buffer& lights,
+    const etna::Buffer& shadow_lights_viewproj_matrices,
     uint32_t lights_count,
+    std::span<etna::Image> lights_shadowmaps,
 
     etna::Image& albedo_image,
     etna::Image& metallic_roughness_image,
@@ -160,7 +195,9 @@ void GBufferLightResolver::run(
 
     glm::uvec2 resolution,
     glm::mat4 proj_view,
-    glm::vec3 cam_pos)
+    glm::vec3 cam_pos,
+    float cam_near
+  )
 {
   vk::PipelineStageFlags2 graphicsPipelineStage =
       vk::PipelineStageFlagBits2::eVertexShader |
@@ -171,6 +208,7 @@ void GBufferLightResolver::run(
       vk::AccessFlagBits2::eShaderStorageRead |
       vk::AccessFlagBits2::eIndirectCommandRead;
   etna::set_state(cmd_buf, lights.get(), graphicsPipelineStage, graphicsAccess);
+  etna::set_state(cmd_buf, shadow_lights_viewproj_matrices.get(), graphicsPipelineStage, graphicsAccess);
 
   etna::set_state(
     cmd_buf,
@@ -208,6 +246,17 @@ void GBufferLightResolver::run(
     vk::ImageAspectFlagBits::eDepth
   );
 
+  for (uint32_t i = 0; i < lights_shadowmaps.size(); ++i) {
+    etna::set_state(
+      cmd_buf,
+      lights_shadowmaps[i].get(),
+      vk::PipelineStageFlagBits2::eFragmentShader,
+      vk::AccessFlagBits2::eShaderSampledRead,
+      vk::ImageLayout::eShaderReadOnlyOptimal,
+      vk::ImageAspectFlagBits::eDepth
+    );
+  }
+
   etna::flush_barriers(cmd_buf);
 
   {
@@ -236,20 +285,22 @@ void GBufferLightResolver::run(
           etna::Binding{2, metallic_roughness_image.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
           etna::Binding{3, normals_image.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
           etna::Binding{4, depth_image.genBinding(defaultSampler.get(), vk::ImageLayout::eShaderReadOnlyOptimal)},
+          etna::Binding{5, shadow_lights_viewproj_matrices.genBinding()},
         });
 
       cmd_buf.bindDescriptorSets(
-        vk::PipelineBindPoint::eGraphics, pipeline.getVkPipelineLayout(), 0, {set.getVkSet()}, {});
+        vk::PipelineBindPoint::eGraphics, pipeline.getVkPipelineLayout(), 0, {set.getVkSet(), shadowmapSet.getVkSet()}, {});
     }
 
     PushConstants pushConst{
       .projView = proj_view,
       .wCamPos = glm::vec4(cam_pos, 1.0f),
-      .resolution = resolution
+      .resolution = resolution,
+      .camNear = cam_near
     };
     cmd_buf.pushConstants<PushConstants>(
       pipeline.getVkPipelineLayout(), vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, {pushConst});
-
+    
     cmd_buf.drawIndexed(
       uint32_t(sphereIndices.size()),
       lights_count,

@@ -22,6 +22,7 @@
 #include "stages/GBufferLightResolver.hpp"
 #include "stages/BufferWithSize.hpp"
 #include "stages/SceneUploader.hpp"
+#include "stages/ShadowMapRenderer.hpp"
 #include "wsi/Keyboard.hpp"
 
 #include "FramePacket.hpp"
@@ -43,8 +44,6 @@ public:
   void drawGui();
   void renderWorld(
     vk::CommandBuffer cmd_buf, vk::Image target_image, vk::ImageView target_image_view);
-
-  void markAABBsDirty() { aabbsDirty = true; }
 
 private:
   void clearAttachments(
@@ -72,6 +71,7 @@ private:
   void recreateLights(uint32_t count);
 
   void recalculateAABBs(vk::CommandBuffer cmd_buf);
+  void renderShadowmaps(vk::CommandBuffer cmd_buf);
 
 private:
   std::unique_ptr<etna::OneShotCmdMgr> oneShotCommands;
@@ -100,10 +100,14 @@ private:
   Camera cameraCopy;
   glm::mat4x4 lightMatrix;
 
+  etna::GpuSharedResource<std::vector<etna::Image>> shadowmaps;
+  etna::GpuSharedResource<etna::Buffer> lightsProjViewMatrices;
+
   SceneUploader sceneUploader;
   CullingManager culler;
   GBufferDrawer gbufferDrawer;
   GBufferLightResolver lightGBufferResolver;
+  ShadowMapRenderer shadowMapRenderer;
   AABBCalculator aabbCalculator;
 
   glm::uvec2 resolution;
@@ -111,20 +115,26 @@ private:
   bool aabbsDirty = true;
 
   std::vector<GBufferLightResolver::Light> lightsVector = {
-    {
-      .posAndIntensity = glm::vec4(1.0f, 1.0f, -1.0f, 1.0f),
-      .color = glm::vec3(1.0f, 0.0f, 0.0f),
-      .lightType = GBufferLightResolver::Light::LightType::Point
-    },
-    {
-      .posAndIntensity = glm::vec4(1.0f, 1.0f, 1.0f, 5.0f),
-      .color = glm::vec3(1.0f, 1.0f, 1.0f),
-      .lightType = GBufferLightResolver::Light::LightType::Directional
-    },
-    {
-      .posAndIntensity = glm::vec4(0.5f, 0.5f, 1.0f, 0.1f),
-      .color = glm::vec3(1.0f, 1.0f, 1.0f),
-      .lightType = GBufferLightResolver::Light::LightType::Ambient
-    },
+    GBufferLightResolver::Light(
+      glm::vec3(1.0f, 1.0f, -1.0f),
+      1.0f,
+      glm::vec3(1.0f, 0.0f, 0.0f),
+      false,
+      GBufferLightResolver::Light::LightType::Point
+    ),
+    GBufferLightResolver::Light(
+      glm::vec3(1.0f, 1.0f, 1.0f),
+      5.0f,
+      glm::vec3(1.0f, 1.0f, 1.0f),
+      true,
+      GBufferLightResolver::Light::LightType::Directional
+    ),
+    GBufferLightResolver::Light(
+      glm::vec3(0.0f, 0.0f, 0.0f),
+      0.1f,
+      glm::vec3(1.0f, 1.0f, 1.0f),
+      false,
+      GBufferLightResolver::Light::LightType::Ambient
+    )
   };
 };

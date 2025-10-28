@@ -12,6 +12,7 @@ layout(push_constant) uniform params_t
   mat4 mProjView;
   vec4 wCamPos;
   uvec2 resolution;
+  float camNear;
 } params;
 
 const uint LIGHT_TYPE_POINT = 0;
@@ -22,13 +23,16 @@ struct Light {
   vec3 center;
   float intensity;
   vec3 color;
-  uint type;
+  uint padding23_castsShadows1_type8;
 };
 
 layout(binding = 0, std140) readonly buffer Lights
 {
   Light values[];
 } lights;
+
+const uint LIGHT_CASTS_SHADOW_MASK = 0x00000100;
+const uint LIGHT_TYPE_MASK         = 0x000000FF;
 
 layout (location = 0 ) out VS_OUT
 {
@@ -50,7 +54,7 @@ float pointLightRadius(float intensity) {
 
 void main(void)
 {
-  const uint lightType = lights.values[gl_InstanceIndex].type;
+  const uint lightType = lights.values[gl_InstanceIndex].padding23_castsShadows1_type8 & LIGHT_TYPE_MASK;
   vec3 center;
   float radius;
   if (lightType == LIGHT_TYPE_POINT) {

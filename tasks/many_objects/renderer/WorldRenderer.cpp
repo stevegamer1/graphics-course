@@ -9,6 +9,7 @@
 #include "stages/GBufferLightResolver.hpp"
 #include "stages/BufferWithSize.hpp"
 #include "stages/SceneUploader.hpp"
+#include "stages/ShadowMapRenderer.hpp"
 
 #include <cstdint>
 #include <cstring>
@@ -36,15 +37,13 @@ WorldRenderer::WorldRenderer(const etna::GpuWorkCount& work_count)
   : oneShotCommands{etna::get_context().createOneShotCmdMgr()}
   , transferHelper(etna::BlockingTransferHelper::CreateInfo{ .stagingSize = 1024 })
   , sceneMgr{std::make_unique<SceneManager>()}
-  // , drawParams(work_count, std::in_place_t{})
   , drawParamsCulledIndicesBuffer(work_count, std::in_place_t{})
-  // , instanceMeshToIndirectCommandMap(work_count, std::in_place_t{})
-  // , indirectCommandsBuffer(work_count, std::in_place_t{})
-  // , indirectCommandsCountBuffer(work_count, std::in_place_t{})
   , albedoImage(work_count, std::in_place_t{})
   , metallicRoughnessImage(work_count, std::in_place_t{})
   , normalsImage(work_count, std::in_place_t{})
   , depthImage(work_count, std::in_place_t{})
+  , shadowmaps(work_count, std::in_place_t{})
+  , lightsProjViewMatrices(work_count, std::in_place_t{})
   , gbufferDrawer()
 {
 }
@@ -58,10 +57,31 @@ void WorldRenderer::allocateResources(glm::uvec2 swapchain_resolution)
 void WorldRenderer::loadScene(std::filesystem::path path)
 {
   sceneMgr->selectScene(path);
-  // invertedSceneView = invert_scene(*sceneMgr);
   sceneUploader.updateScene(*sceneMgr);
   recreateAndUploadBuffersIfNecessary();
   gbufferDrawer.updateTexturesDescriptorSet(sceneMgr->getImages());
+
+  uint32_t shadowLightsCount = 0;
+  for (uint32_t l = 0; l < lightsVector.size(); ++l) {
+    if (lightsVector[l].castsShadows()) {
+      ++shadowLightsCount;
+    }
+  }
+  shadowmaps.iterate([this, shadowLightsCount](std::vector<etna::Image>& cascades) {
+    cascades = shadowMapRenderer.createCascades(shadowLightsCount);
+  });
+  lightGBufferResolver.createShadowmapsDescriptorSet(shadowmaps.get());
+
+  lightsProjViewMatrices.iterate([shadowLightsCount](etna::Buffer& matrices){
+    matrices = etna::get_context().createBuffer(etna::Buffer::CreateInfo{
+      .size = std::max(sizeof(glm::mat4x4) * shadowLightsCount, size_t{1}),
+      .bufferUsage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+      .memoryUsage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+      .name = "Lights view-projection matrices"
+    });
+  });
+
+  aabbsDirty = true;
   loaded = true;
 }
 
@@ -71,6 +91,7 @@ void WorldRenderer::loadShaders()
   culler.loadShader();
   gbufferDrawer.loadShader();
   lightGBufferResolver.loadShader();
+  shadowMapRenderer.loadShader();
 }
 
 void WorldRenderer::setupPipelines(vk::Format swapchain_format)
@@ -82,6 +103,7 @@ void WorldRenderer::setupPipelines(vk::Format swapchain_format)
     sceneMgr->getVertexFormatDescription());
   lightGBufferResolver.createPipeline(
     swapchain_format);
+  shadowMapRenderer.createPipeline();
 }
 
 void WorldRenderer::debugInput(const Keyboard&) {}
@@ -143,6 +165,38 @@ void WorldRenderer::recalculateAABBs(vk::CommandBuffer cmd_buf) {
     uint32_t(sceneMgr->getRenderElements().size()));
 }
 
+void WorldRenderer::renderShadowmaps(vk::CommandBuffer cmd_buf) {
+  std::vector<glm::mat4x4> lightsViewProjMatricesVector;
+  for (uint32_t l = 0; l < lightsVector.size(); ++l) {
+    if (lightsVector[l].castsShadows()) {
+      lightsViewProjMatricesVector.push_back(shadowMapRenderer.createViewProjMatrix(lightsVector[l]));
+    }
+  }
+
+  // TODO: this, as i understand it, kills frames in flight.
+  transferHelper.uploadBuffer(*oneShotCommands, lightsProjViewMatrices.get(), 0, std::span<const glm::mat4x4>(lightsViewProjMatricesVector));
+
+  uint32_t shadowmapIndex = 0;
+  for (uint32_t l = 0; l < lightsVector.size(); ++l) {
+    if (lightsVector[l].castsShadows()) {
+      auto beginShadowmap = shadowmaps.get().begin() + shadowmapIndex * ShadowMapRenderer::IMAGES_IN_CASCADE;
+      auto endShadowmap = beginShadowmap + ShadowMapRenderer::IMAGES_IN_CASCADE;
+
+      shadowMapRenderer.run(
+        cmd_buf,
+        lightsVector[l],
+        std::span<etna::Image, ShadowMapRenderer::IMAGES_IN_CASCADE>(beginShadowmap, endShadowmap),
+        sceneMgr->getVertexBuffer(),
+        sceneMgr->getIndexBuffer(),
+        sceneUploader.getMatricesBuffer().buffer,
+        sceneUploader.getIndirectCommandsBuffer().buffer.get(),
+        sceneUploader.getPipelines().at(PipelineType::PBR).commandCount
+      );
+      ++shadowmapIndex;
+    }
+  }
+}
+
 void WorldRenderer::recreateAndUploadBuffersIfNecessary() {
   uint32_t instancesCount = uint32_t(sceneMgr->getInstanceMeshes().size());
   uint32_t relemsCount = uint32_t(sceneMgr->getRenderElements().size());
@@ -160,7 +214,7 @@ void WorldRenderer::recreateAndUploadBuffersIfNecessary() {
     uint32_t currentCount = uint32_t(aabbBuffer.size / sizeof(AABB));
     if (currentCount < desiredAABBCount) {
       recreateAABBBuffer(desiredAABBCount);
-      markAABBsDirty();
+      aabbsDirty = true;
     } 
   }
 
@@ -404,9 +458,13 @@ void WorldRenderer::resolveGBufferWithLights(
   if (!sceneMgr->getVertexBuffer())
     return;
 
+  
+
   lightGBufferResolver.run(cmd_buf,
     lights.buffer,
+    lightsProjViewMatrices.get(),
     uint32_t(lightsVector.size()),
+    shadowmaps.get(),
     albedoImage.get(),
     metallicRoughnessImage.get(),
     normalsImage.get(),
@@ -416,7 +474,9 @@ void WorldRenderer::resolveGBufferWithLights(
 
     resolution,
     glob_tm,
-    cameraCopy.position);
+    cameraCopy.position,
+    cameraCopy.zNear
+  );
 }
 
 void WorldRenderer::renderWorld(
@@ -436,6 +496,8 @@ void WorldRenderer::renderWorld(
       recalculateAABBs(cmd_buf);
       aabbsDirty = false;
     }
+
+    renderShadowmaps(cmd_buf);
 
     cullMeshes(cmd_buf, cameraCopy);
 

@@ -1,6 +1,7 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_nonuniform_qualifier : require
 
 
 layout(location = 0) out vec4 out_color;
@@ -10,6 +11,7 @@ layout(push_constant) uniform params_t
   mat4 mProjView;
   vec4 wCamPos;
   uvec2 resolution;
+  float camNear;
 } params;
 
 const uint LIGHT_TYPE_POINT = 0;
@@ -20,8 +22,11 @@ struct Light {
   vec3 center;
   float intensity;
   vec3 color;
-  uint type;
+  uint padding23_castsShadows1_type8;
 };
+
+const uint LIGHT_CASTS_SHADOW_MASK = 0x00000100;
+const uint LIGHT_TYPE_MASK         = 0x000000FF;
 
 layout(binding = 0, std140) readonly buffer Lights
 {
@@ -37,6 +42,14 @@ layout(binding = 1) uniform sampler2D gBufferAlbedo;
 layout(binding = 2) uniform sampler2D gBufferMetallicRoughness;
 layout(binding = 3) uniform sampler2D gBufferNormal;
 layout(binding = 4) uniform sampler2D gBufferDepth;
+layout(binding = 5) readonly buffer MLightViewProj {
+  mat4 mats[];
+} mLightViewProj;
+
+// In the future, I imagine each light having uint firstShadowMap and shadowMapCount, and they are allocated in this bindless array of textures.
+// Currently it's actually just one cascaded shadow map.
+// Actually, currently it's actually not cascaded yet.
+layout(set = 1, binding = 0) uniform sampler2D shadowMap[];
 
 const uint FLAG_ZSIGN = (uint(1) << 0);
 
@@ -118,6 +131,20 @@ vec3 getReflectedLightPBR(
   return pow ( ( diff * mix ( baseColor, vec3(0.0), metalness) + spec ) * lightColorWithIntensity, vec3 ( 1.0 / gamma ) );
 }
 
+uint getShadowMapCascadeIndex(float wCamFragDist, float camNear) {
+  // offsetForThisParticularLight + 
+  // return min(uint(floor(log2(wCamFragDist / camNear))), MAX_IMAGE_IN_CASCADE);
+  return 0;
+}
+
+bool isFragmentInShadow(vec3 wFragPos, float wCamFragDist, float camNear) {
+  uint shadowMapIndex = getShadowMapCascadeIndex(wCamFragDist, camNear);
+
+  vec3 lFragPos = (mLightViewProj.mats[shadowMapIndex] * vec4(wFragPos, 1.0f)).xyz;
+  vec2 lFragUV = lFragPos.xy * 0.5f + vec2(0.5f);
+  return texture(shadowMap[shadowMapIndex], lFragUV).r < lFragPos.z;
+}
+
 void main()
 {
   vec2 uv = gl_FragCoord.xy / params.resolution;
@@ -136,18 +163,21 @@ void main()
   vec3 wCamPos = params.wCamPos.xyz;
 
   const vec3 lightColor = lights.values[vOut.instanceIndex].color;
-  const uint lightType = lights.values[vOut.instanceIndex].type;
+  const uint lightType = lights.values[vOut.instanceIndex].padding23_castsShadows1_type8 & LIGHT_TYPE_MASK;
+  const bool castsShadows = (lights.values[vOut.instanceIndex].padding23_castsShadows1_type8 & LIGHT_CASTS_SHADOW_MASK) != 0;
   const vec3 wFragPos = wCamPos + lookVector;
 
   const vec3 wLightPos = lights.values[vOut.instanceIndex].center;
   const float lightIntensity = lights.values[vOut.instanceIndex].intensity;
 
   vec3 reflectedLight;
-  if (lightType == LIGHT_TYPE_POINT) {
+
+  if (castsShadows && isFragmentInShadow(wFragPos, length(lookVector), params.camNear)) {
+    reflectedLight = vec3(0);
+  } else if (lightType == LIGHT_TYPE_POINT) {
     const vec3 lightVector = wLightPos - wFragPos;
     const float lightDistance = length(lightVector);
     const float fadeFactor = 1.0f / (lightDistance * lightDistance);
-    // reflectedLight = max(dot(wNormal, normalize(lightVector)), 0.0f) * lightColor * lightIntensity * fadeFactor;
 
     vec3 lightColorWithIntensity = lightColor * lightIntensity * fadeFactor;
     float metalness = texture(gBufferMetallicRoughness, uv).g;
@@ -163,7 +193,6 @@ void main()
     );
   } else if (lightType == LIGHT_TYPE_DIRECTIONAL) {
     const vec3 lightVector = wLightPos;
-    // reflectedLight = max(dot(wNormal, normalize(lightVector)), 0.0f) * lightColor * lightIntensity;
 
     vec3 lightColorWithIntensity = lightColor * lightIntensity;
     float roughness = texture(gBufferMetallicRoughness, uv).g;
